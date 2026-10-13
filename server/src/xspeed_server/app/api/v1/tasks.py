@@ -1,0 +1,239 @@
+"""``/api/v1/tasks`` endpoints.
+
+Exposes:
+
+* ``POST /api/v1/tasks`` — enqueue a new speedtest task (rate-limited to
+  ``10/hour`` per source IP).
+* ``GET  /api/v1/tasks/{task_id}`` — fetch a single task with its
+  per-probe results (rate-limited to ``100/minute`` per IP).
+* ``GET  /api/v1/tasks`` — paginated task list, newest first.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from typing import Annotated, Any
+
+from asyncpg import Connection
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from xspeed_server.app.core.ratelimit import limiter
+from xspeed_server.app.deps import PoolDep
+
+router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+VLESS_LINK_PATTERN = r"^vless://[0-9a-f-]{36}@[\w.-]+:\d+\?.*$"
+
+
+class TaskCreate(BaseModel):
+    """Payload accepted by ``POST /api/v1/tasks``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    link: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        pattern=VLESS_LINK_PATTERN,
+        description="vless:// URI; full schema is validated by FastAPI's regex.",
+    )
+    probe_tokens: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional whitelist of probe tokens that should run the task. "
+            "When omitted the task is added to the public pool."
+        ),
+    )
+
+    @field_validator("probe_tokens")
+    @classmethod
+    def _strip_probe_tokens(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [token.strip() for token in value if token and token.strip()]
+        if not cleaned:
+            return None
+        return cleaned
+
+
+class TaskCreatedResponse(BaseModel):
+    """Response returned by ``POST /api/v1/tasks``."""
+
+    id: int
+    status: str
+
+
+class TaskResultItem(BaseModel):
+    """Per-probe result for a task."""
+
+    id: int
+    probe_id: int
+    region_id: int
+    speed_mbps: float | None
+    error: str | None
+    created_at: datetime
+
+
+class TaskDetail(BaseModel):
+    """Response returned by ``GET /api/v1/tasks/{id}``."""
+
+    id: int
+    link: str
+    status: str
+    probe_tokens: list[str] | None
+    created_at: datetime
+    completed_at: datetime | None
+    results: list[TaskResultItem]
+
+
+class TaskSummary(BaseModel):
+    """Single row in the paginated task list."""
+
+    id: int
+    link: str
+    status: str
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class TaskList(BaseModel):
+    """Envelope for ``GET /api/v1/tasks``."""
+
+    items: list[TaskSummary]
+    limit: int
+    offset: int
+    total: int
+
+
+async def _insert_task(conn: Connection, link: str, probe_tokens: list[str] | None) -> int:
+    """Insert a new task row and return its primary key.
+
+    Uses raw SQL via asyncpg so the response path is independent from the
+    SQLAlchemy declarative models. ``probe_tokens`` is JSON-encoded
+    before being passed to asyncpg because the default driver codec
+    expects a string for ``jsonb`` parameters.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tasks (link, status, probe_tokens, created_at)
+        VALUES ($1, 'pending', $2::jsonb, now())
+        RETURNING id
+        """,
+        link,
+        None if probe_tokens is None else json.dumps(probe_tokens),
+    )
+    if row is None:  # pragma: no cover - RETURNING is guaranteed by Postgres
+        raise HTTPException(status_code=500, detail="Failed to create task")
+    return int(row["id"])
+
+
+async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, Any] | None:
+    """Fetch the task header plus its results in a single connection checkout."""
+    task_row = await conn.fetchrow(
+        """
+        SELECT id, link, status, probe_tokens, created_at, completed_at
+        FROM tasks
+        WHERE id = $1
+        """,
+        task_id,
+    )
+    if task_row is None:
+        return None
+    result_rows = await conn.fetch(
+        """
+        SELECT id, probe_id, region_id, speed_mbps, error, created_at
+        FROM task_results
+        WHERE task_id = $1
+        ORDER BY created_at ASC
+        """,
+        task_id,
+    )
+    return {
+        "id": task_row["id"],
+        "link": task_row["link"],
+        "status": task_row["status"],
+        "probe_tokens": list(task_row["probe_tokens"]) if task_row["probe_tokens"] else None,
+        "created_at": task_row["created_at"],
+        "completed_at": task_row["completed_at"],
+        "results": [dict(row) for row in result_rows],
+    }
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TaskCreatedResponse,
+    summary="Enqueue a new speedtest task.",
+)
+@limiter.limit("10/hour")
+async def create_task(
+    request: Request,  # required by slowapi to extract the client IP
+    payload: TaskCreate,
+    pool: PoolDep,
+) -> TaskCreatedResponse:
+    """Validate the vless link, insert a ``pending`` row and return its id."""
+    async with pool.acquire() as conn:
+        task_id = await _insert_task(conn, payload.link, payload.probe_tokens)
+    return TaskCreatedResponse(id=task_id, status="pending")
+
+
+@router.get(
+    "/{task_id}",
+    response_model=TaskDetail,
+    summary="Fetch a task along with its per-probe results.",
+)
+@limiter.limit("100/minute")
+async def get_task(
+    request: Request,  # required by slowapi to extract the client IP
+    task_id: Annotated[int, Path(ge=1)],
+    pool: PoolDep,
+) -> TaskDetail:
+    """Return the task header and its results or 404 if the id is unknown."""
+    async with pool.acquire() as conn:
+        record = await _fetch_task_with_results(conn, task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return TaskDetail.model_validate(record)
+
+
+@router.get(
+    "",
+    response_model=TaskList,
+    summary="List tasks, newest first, with offset/limit pagination.",
+)
+@limiter.limit("100/minute")
+async def list_tasks(
+    request: Request,  # required by slowapi to extract the client IP
+    pool: PoolDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> TaskList:
+    """Return a page of tasks ordered by ``created_at`` desc plus the total count."""
+    async with pool.acquire() as conn:
+        total = await conn.fetchval("SELECT count(*) FROM tasks")
+        rows = await conn.fetch(
+            """
+            SELECT id, link, status, created_at, completed_at
+            FROM tasks
+            ORDER BY created_at DESC, id DESC
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
+    items = [TaskSummary.model_validate(dict(row)) for row in rows]
+    return TaskList(items=items, limit=limit, offset=offset, total=int(total or 0))
+
+
+__all__ = [
+    "router",
+    "TaskCreate",
+    "TaskCreatedResponse",
+    "TaskDetail",
+    "TaskList",
+    "TaskSummary",
+    "TaskResultItem",
+    "VLESS_LINK_PATTERN",
+]

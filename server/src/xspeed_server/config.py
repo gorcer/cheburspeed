@@ -22,6 +22,14 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://xspeed:xspeed@localhost:5432/xspeed",
         description="Async SQLAlchemy database URL.",
     )
+    db_pool_min_size: int = Field(default=1, ge=1, description="asyncpg.Pool min size.")
+    db_pool_max_size: int = Field(default=10, ge=1, description="asyncpg.Pool max size.")
+    db_pool_command_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="Default command timeout for asyncpg connections, in seconds.",
+    )
+
     jwt_secret: str = Field(
         default="change-me-in-prod",
         min_length=16,
@@ -40,6 +48,12 @@ class Settings(BaseSettings):
     )
 
     log_level: str = Field(default="INFO")
+
+    probe_online_after_seconds: int = Field(
+        default=120,
+        ge=1,
+        description="Window in seconds that defines whether a probe is 'online'.",
+    )
 
 
 @lru_cache(maxsize=1)
