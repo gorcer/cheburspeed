@@ -74,6 +74,27 @@
     "title": "Документация XSpeed",
     "intro": "XSpeed — это сервис мониторинга скорости VLESS-соединений. Проба устанавливается на узле и через WebSocket получает задания, прогоняет speedtest через xray и возвращает результат на сервер.",
     "apiTitle": "HTTP API",
+    "adminTitle": "API админки",
+    "adminIntro": "Все маршруты ниже защищены JWT. Получите токен через POST /api/v1/admin/login и передавайте его в заголовке Authorization: Bearer <token>.",
+    "adminAuth": "Без токена или с просроченным токеном сервер возвращает 401.",
+    "adminEndpoints": {
+      "login": {
+        "title": "POST /api/v1/admin/login",
+        "description": "Обмен email/пароль на JWT. Тело: { email, password }."
+      },
+      "probes": {
+        "title": "GET/POST/PUT/DELETE /api/v1/admin/probes",
+        "description": "CRUD проб. Токен пробы можно передать явно или сгенерировать автоматически."
+      },
+      "tasks": {
+        "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
+        "description": "Список заданий с фильтрами и детали с результатами."
+      },
+      "stats": {
+        "title": "GET /api/v1/admin/stats",
+        "description": "Сводка для дашборда: медиана по регионам, гистограмма скоростей, archive_lag."
+      }
+    },
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
@@ -110,14 +131,94 @@
     }
   },
   "admin": {
+    "title": "Админка",
     "loginTitle": "Вход в админку",
+    "loginSubtitle": "Введите email и пароль администратора.",
     "emailPlaceholder": "email",
     "passwordPlaceholder": "пароль",
     "submit": "Войти",
     "logout": "Выйти",
     "unauthorized": "Требуется авторизация",
+    "invalidCredentials": "Неверный email или пароль",
     "dashboard": "Дашборд",
-    "comingSoon": "Полноценная админка появится в DAT-325.8."
+    "comingSoon": "Полноценная админка появится в DAT-325.8.",
+    "tabs": {
+      "dashboard": "Дашборд",
+      "probes": "Пробы",
+      "tasks": "Задания"
+    },
+    "dashboard": {
+      "totalsTitle": "Сводка",
+      "totals": {
+        "regions": "Регионов",
+        "probes": "Проб",
+        "tasks": "Заданий",
+        "results24h": "Результатов 24ч",
+        "results7d": "Результатов 7д"
+      },
+      "archiveTitle": "Свежесть архива",
+      "archiveNever": "архив ещё не запускался",
+      "medianTitle": "Медиана скорости по регионам (7д)",
+      "histogramTitle": "Распределение результатов (7д)",
+      "unit": "Мбит/с",
+      "unitCount": "тестов",
+      "empty": "Нет данных"
+    },
+    "probes": {
+      "createTitle": "Создать пробу",
+      "listTitle": "Список проб",
+      "alias": "Алиас",
+      "region": "Регион",
+      "token": "Токен",
+      "tokenAuto": "автогенерация",
+      "isPublic": "Публичная",
+      "submit": "Создать",
+      "regionRequired": "Выберите регион",
+      "empty": "Проб пока нет",
+      "edit": "Изменить",
+      "save": "Сохранить",
+      "cancel": "Отмена",
+      "delete": "Удалить",
+      "yes": "да",
+      "no": "нет",
+      "copyToken": "Скопировать токен",
+      "confirmDelete": "Удалить пробу «{{alias}}»?",
+      "pageOf": "Стр. {{current}} из {{total}}",
+      "prev": "Назад",
+      "next": "Вперёд",
+      "columns": {
+        "id": "ID",
+        "alias": "Алиас",
+        "region": "Регион",
+        "token": "Токен",
+        "public": "Публичная",
+        "lastSeen": "Последний онлайн",
+        "actions": "Действия"
+      }
+    },
+    "tasks": {
+      "filtersTitle": "Фильтры",
+      "filterStatus": "Статус",
+      "filterRegion": "Код региона",
+      "filterFrom": "С даты",
+      "filterTo": "По дату",
+      "statusAll": "Все",
+      "applyFilters": "Применить",
+      "resetFilters": "Сбросить",
+      "listTitle": "Задания",
+      "empty": "Нет заданий",
+      "toggle": "Показать детали",
+      "errors": "ошибок",
+      "columns": {
+        "results": "Результаты"
+      },
+      "detail": {
+        "assignedTo": "Назначено",
+        "startedAt": "Запущено",
+        "completedAt": "Завершено",
+        "probeTokens": "Пробы"
+      }
+    }
   },
   "common": {
     "loading": "Загрузка…",

@@ -2,7 +2,7 @@
         sync lock migrate revision upgrade downgrade \
         server probe probe-run probe-build probe-buildx probe-push frontend \
         test test-server test-probe \
-        archive dist clean docker-build docker-up docker-down docker-logs
+        archive admin-create dist clean docker-build docker-up docker-down docker-logs
 
 SHELL := /usr/bin/env bash
 
@@ -88,6 +88,9 @@ test-probe: ## Run probe tests.
 
 archive: ## Run a single pass of the task_results archive job (DAT-325.7).
 	cd $(SERVER_DIR) && $(UV) run python -m xspeed_server.app.tasks.cli
+
+admin-create: ## Create or update an admin user (DAT-325.8). Args: email=, password=.
+	cd $(SERVER_DIR) && $(UV) run python -m xspeed_server.app.admin_cli create --email $(email) --password $(password)
 
 dist: ## Build release tarballs into dist/.
 	mkdir -p dist

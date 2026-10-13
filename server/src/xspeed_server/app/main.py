@@ -29,6 +29,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from xspeed_server.app.api.admin import build_admin_router
 from xspeed_server.app.api.v1 import probes, regions, tasks
 from xspeed_server.app.config import get_settings
 from xspeed_server.app.core.ratelimit import limiter
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(regions.router, prefix="/api/v1")
     app.include_router(probes.router, prefix="/api/v1")
+    app.include_router(build_admin_router())
     register_websocket_route(app)
 
     @app.get("/healthz", tags=["meta"])

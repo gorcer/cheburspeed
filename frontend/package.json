@@ -18,6 +18,7 @@
     "@sveltejs/kit": "^2.8.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.2",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/d3-scale": "^4.0.9",
     "@types/node": "^22.9.0",
     "eslint": "^9.14.0",
     "eslint-config-prettier": "^9.1.0",
@@ -35,6 +36,7 @@
   "dependencies": {
     "@lucide/svelte": "^0.479.0",
     "@tanstack/svelte-query": "^5.59.16",
+    "d3-scale": "^4.0.2",
     "layerchart": "^1.0.13"
   },
   "packageManager": "pnpm@9.12.3",

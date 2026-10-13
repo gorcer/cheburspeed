@@ -72,8 +72,29 @@
   },
   "docs": {
     "title": "XSpeed documentation",
-    "intro": "XSpeed is a service that monitors VLESS connection speeds. A probe runs on a node, receives tasks over WebSocket, performs a speedtest through xray, and returns the result to the server.",
+    "intro": "XSpeed is a vless speedtest monitoring service. The probe is installed on a node and receives jobs over WebSocket, runs a speedtest through xray and returns the result to the server.",
     "apiTitle": "HTTP API",
+    "adminTitle": "Admin API",
+    "adminIntro": "All routes below are protected by JWT. Obtain a token via POST /api/v1/admin/login and pass it in the Authorization: Bearer <token> header.",
+    "adminAuth": "Without a token or with an expired token the server returns 401.",
+    "adminEndpoints": {
+      "login": {
+        "title": "POST /api/v1/admin/login",
+        "description": "Exchange email/password for a JWT. Body: { email, password }."
+      },
+      "probes": {
+        "title": "GET/POST/PUT/DELETE /api/v1/admin/probes",
+        "description": "Probe CRUD. The probe token can be supplied explicitly or auto-generated."
+      },
+      "tasks": {
+        "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
+        "description": "List tasks with filters and detail with per-probe results."
+      },
+      "stats": {
+        "title": "GET /api/v1/admin/stats",
+        "description": "Dashboard aggregate: per-region medians, speed histogram, archive lag."
+      }
+    },
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
@@ -110,14 +131,94 @@
     }
   },
   "admin": {
+    "title": "Admin",
     "loginTitle": "Admin sign in",
+    "loginSubtitle": "Enter the administrator email and password.",
     "emailPlaceholder": "email",
     "passwordPlaceholder": "password",
     "submit": "Sign in",
     "logout": "Sign out",
     "unauthorized": "Authorization required",
+    "invalidCredentials": "Invalid email or password",
     "dashboard": "Dashboard",
-    "comingSoon": "Full admin UI lands in DAT-325.8."
+    "comingSoon": "Full admin UI lands in DAT-325.8.",
+    "tabs": {
+      "dashboard": "Dashboard",
+      "probes": "Probes",
+      "tasks": "Tasks"
+    },
+    "dashboard": {
+      "totalsTitle": "Totals",
+      "totals": {
+        "regions": "Regions",
+        "probes": "Probes",
+        "tasks": "Tasks",
+        "results24h": "Results 24h",
+        "results7d": "Results 7d"
+      },
+      "archiveTitle": "Archive freshness",
+      "archiveNever": "archive has not run yet",
+      "medianTitle": "Median speed per region (7d)",
+      "histogramTitle": "Result distribution (7d)",
+      "unit": "Mbps",
+      "unitCount": "tests",
+      "empty": "No data"
+    },
+    "probes": {
+      "createTitle": "Create probe",
+      "listTitle": "Probes",
+      "alias": "Alias",
+      "region": "Region",
+      "token": "Token",
+      "tokenAuto": "auto-generated",
+      "isPublic": "Public",
+      "submit": "Create",
+      "regionRequired": "Select a region",
+      "empty": "No probes yet",
+      "edit": "Edit",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "yes": "yes",
+      "no": "no",
+      "copyToken": "Copy token",
+      "confirmDelete": "Delete probe «{{alias}}»?",
+      "pageOf": "Page {{current}} of {{total}}",
+      "prev": "Prev",
+      "next": "Next",
+      "columns": {
+        "id": "ID",
+        "alias": "Alias",
+        "region": "Region",
+        "token": "Token",
+        "public": "Public",
+        "lastSeen": "Last seen",
+        "actions": "Actions"
+      }
+    },
+    "tasks": {
+      "filtersTitle": "Filters",
+      "filterStatus": "Status",
+      "filterRegion": "Region code",
+      "filterFrom": "From",
+      "filterTo": "To",
+      "statusAll": "All",
+      "applyFilters": "Apply",
+      "resetFilters": "Reset",
+      "listTitle": "Tasks",
+      "empty": "No tasks",
+      "toggle": "Toggle details",
+      "errors": "errors",
+      "columns": {
+        "results": "Results"
+      },
+      "detail": {
+        "assignedTo": "Assigned to",
+        "startedAt": "Started",
+        "completedAt": "Completed",
+        "probeTokens": "Probe tokens"
+      }
+    }
   },
   "common": {
     "loading": "Loading…",
