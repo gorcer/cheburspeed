@@ -1,6 +1,7 @@
 .PHONY: help install install-server install-probe install-frontend \
         sync lock migrate revision upgrade downgrade \
-        server probe frontend test test-server test-probe \
+        server probe probe-run probe-build probe-buildx probe-push frontend \
+        test test-server test-probe \
         archive clean docker-build docker-up docker-down docker-logs
 
 SHELL := /usr/bin/env bash
@@ -14,6 +15,10 @@ PYTHON         ?= python3
 UV             ?= uv
 DOCKER         ?= docker
 PNPM           ?= pnpm
+
+PROBE_IMAGE          ?= ghcr.io/gorcer/xspeed-probe
+PROBE_IMAGE_TAG      ?= latest
+PROBE_PLATFORMS      ?= linux/amd64,linux/arm64
 
 DATABASE_URL   ?= $(shell grep -E '^DATABASE_URL=' $(ROOT_DIR)/.env 2>/dev/null | cut -d= -f2-)
 ifeq ($(strip $(DATABASE_URL)),)
@@ -54,8 +59,21 @@ downgrade: ## Roll back the last migration.
 server: ## Run the FastAPI backend (dev).
 	cd $(SERVER_DIR) && $(UV) run uvicorn xspeed_server.app:create_app --host 0.0.0.0 --port 8000 --reload --factory
 
-probe: ## Run the local probe.
+probe: probe-buildx ## Build and push the multi-arch probe image.
+
+probe-run: ## Run the local probe without Docker.
 	cd $(PROBE_DIR) && $(UV) run xspeed-probe
+
+probe-build: ## Build a single-arch probe image (host architecture).
+	$(DOCKER) build -t $(PROBE_IMAGE):$(PROBE_IMAGE_TAG) -f $(PROBE_DIR)/Dockerfile $(PROBE_DIR)
+
+probe-buildx: ## Build and push the multi-arch probe image (linux/amd64,linux/arm64).
+	$(DOCKER) buildx build \
+	    --platform $(PROBE_PLATFORMS) \
+	    -t $(PROBE_IMAGE):$(PROBE_IMAGE_TAG) \
+	    -f $(PROBE_DIR)/Dockerfile \
+	    --push \
+	    $(PROBE_DIR)
 
 frontend: ## Run the SvelteKit dev server.
 	cd $(FRONTEND_DIR) && $(PNPM) dev
