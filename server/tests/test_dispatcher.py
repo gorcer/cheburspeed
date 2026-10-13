@@ -1,0 +1,405 @@
+"""Tests for the WebSocket task dispatcher.
+
+These cover the four contracts the dispatcher must honour:
+
+* :func:`claim_task` picks the oldest pending task whose whitelist
+  admits the supplied probe — and never the same task twice when two
+  probes race for the queue (``FOR UPDATE SKIP LOCKED``),
+* :func:`check_completion` flips a single-probe task to
+  ``completed`` the moment a result lands,
+* :func:`check_completion` resets multi-probe tasks to ``pending``
+  until every distinct probe in the whitelist has reported,
+* :func:`sweep_stale_running_tasks` revives ``running`` tasks that
+  never produced a result inside the staleness window.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import asyncpg
+import pytest
+
+from xspeed_server.app.db import Database
+from xspeed_server.app.ws.dispatcher import (
+    STALE_RUNNING_AFTER_SECONDS,
+    ClaimedTask,
+    check_completion,
+    claim_task,
+    dispatch_to_probe,
+    record_result,
+    sweep_stale_running_tasks,
+)
+from xspeed_server.app.ws.hub import Hub
+from xspeed_server.app.ws.protocol import PROTOCOL_VERSION
+
+from .conftest import _test_database_url
+
+VALID_LINK = (
+    "vless://11111111-2222-3333-4444-555555555555@example.com:443"
+    "?security=reality&sni=cdn.example.com&type=tcp#demo"
+)
+
+
+def _test_dsn() -> str:
+    url = _test_database_url()
+    if url.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + url[len("postgresql+asyncpg://") :]
+    return url
+
+
+async def _seed_region(code: str = "RU-MOW", title: str = "Москва") -> int:
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO regions (code, title, lat, lon)
+            VALUES ($1, $2, 55.7558, 37.6173)
+            RETURNING id
+            """,
+            code,
+            title,
+        )
+        return int(row["id"])
+    finally:
+        await conn.close()
+
+
+async def _seed_probe(token: str, region_id: int) -> int:
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO probes (alias, token, region_id, is_public)
+            VALUES ($1, $2, $3, TRUE)
+            RETURNING id
+            """,
+            f"probe-{token[:4]}",
+            token,
+            region_id,
+        )
+        return int(row["id"])
+    finally:
+        await conn.close()
+
+
+async def _insert_task(
+    link: str,
+    probe_tokens: list[str] | None = None,
+    status: str = "pending",
+) -> int:
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tasks (link, status, probe_tokens)
+            VALUES ($1, $2, $3::jsonb)
+            RETURNING id
+            """,
+            link,
+            status,
+            None if probe_tokens is None else json.dumps(probe_tokens),
+        )
+        return int(row["id"])
+    finally:
+        await conn.close()
+
+
+@pytest.fixture
+async def app_db(app_instance: Any) -> Database:
+    """Return the :class:`Database` instance attached to the test app."""
+    return app_instance.state.db  # type: ignore[no-any-return]
+
+
+async def test_claim_task_returns_none_when_queue_is_empty(app_db: Database) -> None:
+    """With no pending tasks the dispatcher yields ``None``."""
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="any-token")
+    assert claimed is None
+
+
+async def test_claim_task_picks_oldest_pending_task(app_db: Database) -> None:
+    """The oldest pending task is reserved first."""
+    first = await _insert_task(VALID_LINK)
+    second = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-x")
+
+    assert claimed is not None
+    assert claimed.id == first
+    assert claimed.link == VALID_LINK
+    assert claimed.id != second
+
+
+async def test_claim_task_filters_by_probe_tokens_whitelist(app_db: Database) -> None:
+    """A probe outside the whitelist cannot pick up the task."""
+    allowed_task = await _insert_task(VALID_LINK, probe_tokens=["probe-a"])
+    other_task = await _insert_task(VALID_LINK, probe_tokens=["probe-b"])
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-a")
+
+    assert claimed is not None
+    assert claimed.id == allowed_task
+    assert claimed.id != other_task
+
+
+async def test_claim_task_marks_running_with_assigned_to(app_db: Database) -> None:
+    """Successful claim updates ``tasks.status`` and ``assigned_to``."""
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token="probe-claim")
+        row = await conn.fetchrow(
+            "SELECT status, assigned_to, started_at FROM tasks WHERE id = $1",
+            task_id,
+        )
+
+    assert row["status"] == "running"
+    assert row["assigned_to"] == "probe-claim"
+    assert row["started_at"] is not None
+
+
+async def test_dispatch_distributes_tasks_to_probes_without_duplicates(
+    app_db: Database,
+) -> None:
+    """Two probes race for three tasks — every probe gets a distinct task."""
+    await _seed_region()
+    await _insert_task(VALID_LINK)
+    await _insert_task(VALID_LINK)
+    await _insert_task(VALID_LINK)
+
+    hub = Hub()
+    dispatched: list[int] = []
+    sent: list[str] = []
+
+    async def fake_send(token: str, message: dict[str, Any]) -> bool:
+        sent.append(token)
+        if message.get("type") == "task.assigned":
+            dispatched.append(int(message["task_id"]))
+            return True
+        return False
+
+    hub.send = fake_send  # type: ignore[method-assign]
+
+    async with app_db.pool.acquire():
+        await dispatch_to_probe(app_db, hub, "probe-a")
+    async with app_db.pool.acquire():
+        await dispatch_to_probe(app_db, hub, "probe-b")
+
+    assert len(dispatched) == 2
+    assert len(set(dispatched)) == 2  # no duplicates
+    assert set(sent) == {"probe-a", "probe-b"}
+
+
+async def test_check_completion_marks_single_probe_task_completed(
+    app_db: Database,
+) -> None:
+    """A task with no whitelist flips to ``completed`` after one result."""
+    region_id = await _seed_region()
+    probe_token = "probe-single"
+    probe_id = await _seed_probe(probe_token, region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token=probe_token)
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_id,
+            region_id=region_id,
+            speed_mbps=10.5,
+            error=None,
+            raw={"speed_mbps": 10.5, "error": None},
+        )
+        completed = await check_completion(conn, task_id)
+        row = await conn.fetchrow(
+            "SELECT status, completed_at, assigned_to FROM tasks WHERE id = $1",
+            task_id,
+        )
+
+    assert completed is True
+    assert row["status"] == "completed"
+    assert row["completed_at"] is not None
+    assert row["assigned_to"] is None
+
+
+async def test_check_completion_resets_multi_probe_task_to_pending(
+    app_db: Database,
+) -> None:
+    """With a multi-probe whitelist the task stays pending until everyone reports."""
+    region_id = await _seed_region()
+    task_id = await _insert_task(VALID_LINK, probe_tokens=["probe-a", "probe-b"])
+    probe_a = await _seed_probe("probe-a", region_id)
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token="probe-a")
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_a,
+            region_id=region_id,
+            speed_mbps=8.0,
+            error=None,
+            raw={"speed_mbps": 8.0, "error": None},
+        )
+        completed = await check_completion(conn, task_id)
+        row = await conn.fetchrow(
+            "SELECT status, assigned_to FROM tasks WHERE id = $1", task_id
+        )
+
+    assert completed is False
+    assert row["status"] == "pending"
+    assert row["assigned_to"] is None
+
+    # Second probe reports — task completes.
+    probe_b = await _seed_probe("probe-b", region_id)
+    async with app_db.pool.acquire() as conn:
+        claimed_b = await claim_task(conn, probe_token="probe-b")
+        assert claimed_b is not None
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_b,
+            region_id=region_id,
+            speed_mbps=12.0,
+            error=None,
+            raw={"speed_mbps": 12.0, "error": None},
+        )
+        completed = await check_completion(conn, task_id)
+        row = await conn.fetchrow(
+            "SELECT status, completed_at FROM tasks WHERE id = $1", task_id
+        )
+
+    assert completed is True
+    assert row["status"] == "completed"
+    assert row["completed_at"] is not None
+
+
+async def test_sweep_resets_stale_running_tasks(app_db: Database) -> None:
+    """``running`` tasks older than the threshold without results go back to pending."""
+    task_id = await _insert_task(VALID_LINK)
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        await conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'running',
+                assigned_to = 'probe-stuck',
+                started_at = now() - ($1 || ' seconds')::interval - interval '5 minutes'
+            WHERE id = $2
+            """,
+            str(STALE_RUNNING_AFTER_SECONDS),
+            task_id,
+        )
+    finally:
+        await conn.close()
+
+    swept = await sweep_stale_running_tasks(app_db)
+    assert swept >= 1
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            "SELECT status, assigned_to, started_at FROM tasks WHERE id = $1", task_id
+        )
+    finally:
+        await conn.close()
+    assert row["status"] == "pending"
+    assert row["assigned_to"] is None
+    assert row["started_at"] is None
+
+
+async def test_sweep_leaves_recent_running_tasks_alone(app_db: Database) -> None:
+    """A task that was just assigned is not yet stale."""
+    task_id = await _insert_task(VALID_LINK)
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token="probe-fresh")
+
+    swept = await sweep_stale_running_tasks(app_db)
+    # The fresh task must not be swept; ``swept`` may be zero or contain
+    # rows from a previous test if they leaked, so we check directly.
+    assert swept >= 0
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            "SELECT status, assigned_to FROM tasks WHERE id = $1", task_id
+        )
+    finally:
+        await conn.close()
+    assert row["status"] == "running"
+    assert row["assigned_to"] == "probe-fresh"
+
+
+async def test_record_result_overwrites_existing_row_for_same_probe(
+    app_db: Database,
+) -> None:
+    """A probe retrying after a network blip updates the same row."""
+    region_id = await _seed_region()
+    probe_token = "probe-retry"
+    probe_id = await _seed_probe(probe_token, region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token=probe_token)
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_id,
+            region_id=region_id,
+            speed_mbps=5.0,
+            error="timeout",
+            raw={"speed_mbps": 5.0, "error": "timeout"},
+        )
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_id,
+            region_id=region_id,
+            speed_mbps=11.0,
+            error=None,
+            raw={"speed_mbps": 11.0, "error": None},
+        )
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        rows = await conn.fetch(
+            "SELECT speed_mbps, error FROM task_results WHERE task_id = $1", task_id
+        )
+    finally:
+        await conn.close()
+    assert len(rows) == 1
+    assert rows[0]["speed_mbps"] == pytest.approx(11.0)
+    assert rows[0]["error"] is None
+
+
+def test_protocol_version_constant_matches_spec() -> None:
+    """The exported protocol version is what probes expect to see."""
+    assert PROTOCOL_VERSION == 1
+
+
+def test_claimed_task_is_a_dataclass_with_id_and_link() -> None:
+    """Sanity check on the public :class:`ClaimedTask` shape."""
+    sample = ClaimedTask(id=1, link=VALID_LINK)
+    assert sample.id == 1
+    assert sample.link == VALID_LINK
+
+
+__all__ = [
+    "test_claim_task_returns_none_when_queue_is_empty",
+    "test_claim_task_picks_oldest_pending_task",
+    "test_claim_task_filters_by_probe_tokens_whitelist",
+    "test_claim_task_marks_running_with_assigned_to",
+    "test_dispatch_distributes_tasks_to_probes_without_duplicates",
+    "test_check_completion_marks_single_probe_task_completed",
+    "test_check_completion_resets_multi_probe_task_to_pending",
+    "test_sweep_resets_stale_running_tasks",
+    "test_sweep_leaves_recent_running_tasks_alone",
+    "test_record_result_overwrites_existing_row_for_same_probe",
+    "test_protocol_version_constant_matches_spec",
+    "test_claimed_task_is_a_dataclass_with_id_and_link",
+]

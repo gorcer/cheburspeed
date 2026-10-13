@@ -8,7 +8,8 @@ The factory wires together:
   the asyncpg pool and the SQLAlchemy async engine,
 * the v1 HTTP routers (``/api/v1/tasks``, ``/api/v1/regions``,
   ``/api/v1/probes``),
-* a placeholder :class:`Hub` for the WebSocket task (DAT-325.4),
+* the WebSocket :class:`Hub` and the stale-task sweeper background
+  task,
 * the APScheduler that will run the archive job (DAT-325.7).
 
 The lifespan is the single place that touches the database: routes only
@@ -17,6 +18,7 @@ read the pool from ``app.state.db``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -32,7 +34,7 @@ from xspeed_server.app.config import get_settings
 from xspeed_server.app.core.ratelimit import limiter
 from xspeed_server.app.db import Database
 from xspeed_server.app.tasks import start_archive_scheduler
-from xspeed_server.app.ws import Hub
+from xspeed_server.app.ws import Hub, register_websocket_route, start_sweeper
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -54,6 +56,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("database connection verified")
     app.state.db = db
     app.state.hub = Hub()
+    sweeper = start_sweeper(db)
+    app.state.sweeper = sweeper
     scheduler: AsyncIOScheduler | None = start_archive_scheduler(db)
     app.state.scheduler = scheduler
 
@@ -61,6 +65,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         logger.info("xspeed-server shutting down")
+        sweeper.cancel()
+        try:
+            await sweeper
+        except asyncio.CancelledError:
+            pass
         if scheduler is not None:
             scheduler.shutdown(wait=False)
         await db.dispose()
@@ -97,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(regions.router, prefix="/api/v1")
     app.include_router(probes.router, prefix="/api/v1")
+    register_websocket_route(app)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:

@@ -33,6 +33,8 @@ class Task(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    assigned_to: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -40,6 +42,7 @@ class Task(Base):
             name="ck_tasks_status",
         ),
         Index("ix_tasks_status_created_at", "status", "created_at"),
+        Index("ix_tasks_status_started_at", "status", "started_at"),
     )
 
     def __repr__(self) -> str:
