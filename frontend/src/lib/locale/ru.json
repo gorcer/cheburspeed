@@ -1,0 +1,127 @@
+{
+  "app": {
+    "title": "XSpeed",
+    "subtitle": "Сервис мониторинга скорости VLESS-соединений"
+  },
+  "nav": {
+    "home": "Главная",
+    "docs": "Документация",
+    "admin": "Админка",
+    "language": "Язык"
+  },
+  "form": {
+    "title": "Проверить VLESS-ссылку",
+    "description": "Вставьте ссылку формата vless:// — ноды из регионов выполнят speedtest и обновят карту.",
+    "linkPlaceholder": "vless://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@host:443?...",
+    "submit": "Запустить проверку",
+    "submitting": "Отправляем…",
+    "errorInvalid": "Ссылка должна начинаться с vless://",
+    "errorNetwork": "Не удалось отправить задачу. Попробуйте позже."
+  },
+  "map": {
+    "title": "Карта регионов",
+    "empty": "Нет онлайн-проб",
+    "legend": {
+      "fast": "≥ 20 Мбит/с",
+      "slow": "5–20 Мбит/с",
+      "dead": "< 5 Мбит/с",
+      "offline": "Нет данных"
+    },
+    "selected": "Выбран регион: {{title}} ({{code}})",
+    "online": "онлайн: {{count}}",
+    "median": "медиана: {{value}} Мбит/с",
+    "noResults": "нет данных"
+  },
+  "results": {
+    "title": "Последние проверки",
+    "empty": "Задач пока нет. Введите ссылку выше, чтобы запустить первую проверку.",
+    "columns": {
+      "id": "ID",
+      "link": "Ссылка",
+      "status": "Статус",
+      "probes": "Пробы",
+      "created": "Создано",
+      "completed": "Завершено"
+    },
+    "status": {
+      "pending": "в очереди",
+      "running": "выполняется",
+      "completed": "завершена",
+      "failed": "ошибка"
+    },
+    "details": {
+      "title": "Результаты по пробам",
+      "empty": "Эта задача ещё не получила результатов.",
+      "region": "Регион",
+      "probe": "Проба",
+      "speed": "Скорость",
+      "error": "Ошибка",
+      "speedValue": "{{value}} Мбит/с"
+    },
+    "pagination": {
+      "prev": "Назад",
+      "next": "Вперёд",
+      "page": "Стр. {{page}} из {{total}}"
+    }
+  },
+  "status": {
+    "live": "Live",
+    "connecting": "Подключение…",
+    "offline": "Отключено",
+    "retryIn": "повтор через {{seconds}}с"
+  },
+  "docs": {
+    "title": "Документация XSpeed",
+    "intro": "XSpeed — это сервис мониторинга скорости VLESS-соединений. Проба устанавливается на узле и через WebSocket получает задания, прогоняет speedtest через xray и возвращает результат на сервер.",
+    "apiTitle": "HTTP API",
+    "endpoints": {
+      "createTask": {
+        "title": "POST /api/v1/tasks",
+        "description": "Создать новое задание. Тело: { link, probe_tokens? }."
+      },
+      "getTask": {
+        "title": "GET /api/v1/tasks/{id}",
+        "description": "Получить задание с результатами."
+      },
+      "listTasks": {
+        "title": "GET /api/v1/tasks?limit=&offset=",
+        "description": "Список последних заданий, поддерживает пагинацию."
+      },
+      "listRegions": {
+        "title": "GET /api/v1/regions",
+        "description": "Список регионов с агрегатами probe_count и last_median_mbps."
+      },
+      "onlineProbes": {
+        "title": "GET /api/v1/probes/online",
+        "description": "Сводка по регионам: онлайн-пробы и медианная скорость."
+      }
+    },
+    "wsTitle": "WebSocket",
+    "wsDescription": "Пробы подключаются к /ws с токеном в заголовке Authorization: Bearer <token>. После online-сообщения сервер раздаёт задания, проба возвращает результат.",
+    "events": {
+      "taskAssigned": "task.assigned → пробе выдано задание",
+      "online": "online → проба сообщает алиас, регион и версию",
+      "result": "result → проба возвращает скорость или ошибку"
+    },
+    "limitsTitle": "Ограничения",
+    "limits": {
+      "createTask": "POST /tasks — 10 запросов в час с одного IP",
+      "getTask": "GET /tasks/{id} — 100 запросов в минуту"
+    }
+  },
+  "admin": {
+    "loginTitle": "Вход в админку",
+    "emailPlaceholder": "email",
+    "passwordPlaceholder": "пароль",
+    "submit": "Войти",
+    "logout": "Выйти",
+    "unauthorized": "Требуется авторизация",
+    "dashboard": "Дашборд",
+    "comingSoon": "Полноценная админка появится в DAT-325.8."
+  },
+  "common": {
+    "loading": "Загрузка…",
+    "error": "Ошибка",
+    "retry": "Повторить"
+  }
+}

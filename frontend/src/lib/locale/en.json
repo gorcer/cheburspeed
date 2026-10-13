@@ -1,0 +1,127 @@
+{
+  "app": {
+    "title": "XSpeed",
+    "subtitle": "VLESS connection speed monitoring service"
+  },
+  "nav": {
+    "home": "Home",
+    "docs": "Docs",
+    "admin": "Admin",
+    "language": "Language"
+  },
+  "form": {
+    "title": "Test a VLESS link",
+    "description": "Paste a vless:// link — probes across regions will run the speedtest and refresh the map.",
+    "linkPlaceholder": "vless://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@host:443?...",
+    "submit": "Run check",
+    "submitting": "Submitting…",
+    "errorInvalid": "Link must start with vless://",
+    "errorNetwork": "Could not enqueue the task. Try again later."
+  },
+  "map": {
+    "title": "Region map",
+    "empty": "No online probes",
+    "legend": {
+      "fast": "≥ 20 Mbps",
+      "slow": "5–20 Mbps",
+      "dead": "< 5 Mbps",
+      "offline": "No data"
+    },
+    "selected": "Selected region: {{title}} ({{code}})",
+    "online": "online: {{count}}",
+    "median": "median: {{value}} Mbps",
+    "noResults": "no data"
+  },
+  "results": {
+    "title": "Recent checks",
+    "empty": "No tasks yet. Submit a link above to run the first check.",
+    "columns": {
+      "id": "ID",
+      "link": "Link",
+      "status": "Status",
+      "probes": "Probes",
+      "created": "Created",
+      "completed": "Completed"
+    },
+    "status": {
+      "pending": "pending",
+      "running": "running",
+      "completed": "completed",
+      "failed": "failed"
+    },
+    "details": {
+      "title": "Per-probe results",
+      "empty": "No results received yet.",
+      "region": "Region",
+      "probe": "Probe",
+      "speed": "Speed",
+      "error": "Error",
+      "speedValue": "{{value}} Mbps"
+    },
+    "pagination": {
+      "prev": "Previous",
+      "next": "Next",
+      "page": "Page {{page}} of {{total}}"
+    }
+  },
+  "status": {
+    "live": "Live",
+    "connecting": "Connecting…",
+    "offline": "Offline",
+    "retryIn": "retry in {{seconds}}s"
+  },
+  "docs": {
+    "title": "XSpeed documentation",
+    "intro": "XSpeed is a service that monitors VLESS connection speeds. A probe runs on a node, receives tasks over WebSocket, performs a speedtest through xray, and returns the result to the server.",
+    "apiTitle": "HTTP API",
+    "endpoints": {
+      "createTask": {
+        "title": "POST /api/v1/tasks",
+        "description": "Create a new task. Body: { link, probe_tokens? }."
+      },
+      "getTask": {
+        "title": "GET /api/v1/tasks/{id}",
+        "description": "Fetch a task with its results."
+      },
+      "listTasks": {
+        "title": "GET /api/v1/tasks?limit=&offset=",
+        "description": "List recent tasks with pagination."
+      },
+      "listRegions": {
+        "title": "GET /api/v1/regions",
+        "description": "List regions with probe_count and last_median_mbps aggregates."
+      },
+      "onlineProbes": {
+        "title": "GET /api/v1/probes/online",
+        "description": "Per-region summary: online probes and median speed."
+      }
+    },
+    "wsTitle": "WebSocket",
+    "wsDescription": "Probes connect to /ws with a token in the Authorization: Bearer header. After the online message the server dispatches tasks; the probe returns a result.",
+    "events": {
+      "taskAssigned": "task.assigned → probe is given a task",
+      "online": "online → probe reports alias, region and version",
+      "result": "result → probe returns a speed value or error"
+    },
+    "limitsTitle": "Rate limits",
+    "limits": {
+      "createTask": "POST /tasks — 10 requests per hour per IP",
+      "getTask": "GET /tasks/{id} — 100 requests per minute"
+    }
+  },
+  "admin": {
+    "loginTitle": "Admin sign in",
+    "emailPlaceholder": "email",
+    "passwordPlaceholder": "password",
+    "submit": "Sign in",
+    "logout": "Sign out",
+    "unauthorized": "Authorization required",
+    "dashboard": "Dashboard",
+    "comingSoon": "Full admin UI lands in DAT-325.8."
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Error",
+    "retry": "Retry"
+  }
+}
