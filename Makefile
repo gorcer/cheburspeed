@@ -2,7 +2,7 @@
         sync lock migrate revision upgrade downgrade \
         server probe probe-run probe-build probe-buildx probe-push frontend \
         test test-server test-probe \
-        archive clean docker-build docker-up docker-down docker-logs
+        archive dist clean docker-build docker-up docker-down docker-logs
 
 SHELL := /usr/bin/env bash
 
@@ -86,7 +86,10 @@ test-server: ## Run server tests.
 test-probe: ## Run probe tests.
 	cd $(PROBE_DIR) && $(UV) run pytest
 
-archive: ## Build release tarballs into dist/.
+archive: ## Run a single pass of the task_results archive job (DAT-325.7).
+	cd $(SERVER_DIR) && $(UV) run python -m xspeed_server.app.tasks.cli
+
+dist: ## Build release tarballs into dist/.
 	mkdir -p dist
 	tar --exclude='./dist' --exclude='./.venv' --exclude='./**/.venv' \
 	    --exclude='./**/__pycache__' --exclude='./**/node_modules' \
