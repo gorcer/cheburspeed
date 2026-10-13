@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.*.local
+
+# uv
+.uv-cache/
+uv.lock
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-cache/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Node / frontend
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+.svelte-kit/
+build/
+.vite/
+dist/
+.parcel-cache/
+
+# Logs / runtime
+*.log
+logs/
+
+# Docker / compose
+.docker/
+docker-compose.override.yml
