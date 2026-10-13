@@ -13,7 +13,6 @@ env/
 
 # uv
 .uv-cache/
-uv.lock
 
 # Distribution / packaging
 build/

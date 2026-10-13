@@ -1,0 +1,75 @@
+[project]
+name = "xspeed-server"
+version = "0.1.0"
+description = "XSpeed backend (FastAPI + PostgreSQL + WebSocket)"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "XSpeed" },
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "websockets>=13.1",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "slowapi>=0.1.9",
+    "httpx>=0.27.2",
+    "python-multipart>=0.0.12",
+    "orjson>=3.10.7",
+]
+
+[project.optional-dependencies]
+runtime = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "types-passlib>=1.7.7.20240819",
+]
+
+[project.scripts]
+xspeed-server = "xspeed_server.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xspeed_server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "ASYNC", "S"]
+ignore = [
+    "S101",
+    "S104",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -q"
