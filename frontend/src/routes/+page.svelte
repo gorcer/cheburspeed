@@ -1,28 +1,15 @@
 <script lang="ts">
-  import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 30_000,
-        refetchOnWindowFocus: false,
-      },
-    },
-  });
+  import Map from '$lib/components/Map.svelte';
+  import ProbeForm from '$lib/components/ProbeForm.svelte';
+  import ResultsTable from '$lib/components/ResultsTable.svelte';
 </script>
 
-<QueryClientProvider {client}>
-  <main class="container">
-    <h1>XSpeed</h1>
-    <p>Сервис мониторинга скорости vless соединений.</p>
-  </main>
-</QueryClientProvider>
+<svelte:head>
+  <title>XSpeed — карта скоростей VLESS</title>
+</svelte:head>
 
-<style>
-  .container {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 2rem 1rem;
-    font-family: system-ui, sans-serif;
-  }
-</style>
+<div class="space-y-6">
+  <ProbeForm />
+  <Map />
+  <ResultsTable />
+</div>
