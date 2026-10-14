@@ -54,3 +54,12 @@ logs/
 # Docker / compose
 .docker/
 docker-compose.override.yml
+
+# Local production stacks
+.env.prod
+.env.prod.local
+.env.prod.*
+!/.env.prod.example
+nginx/certbot/www/*
+!nginx/certbot/www/.gitkeep
+dist/

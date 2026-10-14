@@ -5,34 +5,195 @@
 ## Структура монорепо
 
 - `server/` — FastAPI backend (REST API + WebSocket), PostgreSQL, JWT auth.
-- `probe/` — клиентская проба (xray + speedtest через WebSocket).
+- `probe/` — клиентская проба (xray + speedtest через WebSocket),
+  multi-arch Docker-образ (`linux/amd64`, `linux/arm64`).
 - `frontend/` — SvelteKit UI (карта нод, live-результаты тестов).
-- `nginx/` — реверс-прокси.
-- `Makefile` — основные таргеты (`make install`, `make migrate`, `make server`, …).
-- `docker-compose.yml` — стек `postgres` + `server` + `frontend` + `nginx`.
+- `nginx/` — реверс-прокси. `nginx.conf` для dev,
+  `nginx-prod.conf.template` для production с TLS + ACME.
+- `docker-compose.yml` — локальный стек `postgres` + `server`
+  + `frontend` + `nginx` без TLS.
+- `docker-compose.prod.yml` — production-стек: `restart: always`,
+  healthchecks, certbot, persistent volumes.
+- `.github/workflows/` — CI/CD: `server-ci.yml`, `frontend-ci.yml`,
+  `probe-ci.yml`, `release.yml`.
+- `Makefile` — основные таргеты (`make install`, `make migrate`, …).
 
-## Быстрый старт
+## Быстрый старт (dev)
 
 ```sh
 cp .env.example .env
 make install
 make migrate
 make server      # запуск backend
-make probe       # запуск локальной пробы
+make probe       # сборка и push локальной multi-arch пробы
 make frontend    # запуск SvelteKit dev-сервера
 make test
 ```
 
-Полный запуск в Docker:
+Запуск всего стека в Docker (без TLS):
 
 ```sh
 docker compose up --build
 ```
 
+## Production deployment
+
+Production-стек работает только на образах из GHCR, выкатывает HTTPS
+через certbot и применяет `restart: always`. Один раз подготовить:
+
+```sh
+cp .env.prod.example .env.prod
+$EDITOR .env.prod   # заполнить JWT_SECRET, NGINX_SERVER_NAME, CERTBOT_EMAIL, …
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+```
+
+Получить первый сертификат Let's Encrypt:
+
+```sh
+make certbot-init
+# либо:
+# docker compose -f docker-compose.prod.yml --env-file .env.prod \
+#   --profile init run --rm certbot-init
+```
+
+Поднять стек:
+
+```sh
+make prod-up
+make prod-logs       # логи в реальном времени
+make prod-ps         # статус сервисов и healthcheck'и
+```
+
+Поддерживаемые `make`-таргеты production-стека:
+
+| Команда             | Что делает                                                            |
+|---------------------|-----------------------------------------------------------------------|
+| `make prod-up`      | `compose … up -d`                                                     |
+| `make prod-down`    | `compose … down`                                                      |
+| `make prod-logs`    | `compose … logs -f`                                                   |
+| `make prod-ps`      | `compose … ps`                                                        |
+| `make prod-pull`    | подтянуть свежие образы по `XSPEED_VERSION`                           |
+| `make prod-config`  | провалидировать compose-конфиг (`docker compose config`)              |
+| `make certbot-init` | одноразовый выпуск сертификата через webroot                           |
+
+После первого `prod-up` certbot-контейнер периодически продлевает
+сертификаты (каждые 12 часов) — отдельный cron не нужен.
+
 ## Переменные окружения
 
-См. `.env.example`. Обязательные: `DATABASE_URL`, `JWT_SECRET`, `WS_HOST`, `FRONTEND_ORIGIN`.
+`.env` (dev) — см. `.env.example`. Обязательные: `DATABASE_URL`,
+`JWT_SECRET`, `WS_HOST`, `FRONTEND_ORIGIN`.
+
+`.env.prod` (production) — см. `.env.prod.example`. Кроме dev-полей нужны:
+
+| Переменная            | Назначение                                                |
+|-----------------------|------------------------------------------------------------|
+| `GITHUB_REPOSITORY_OWNER` | владелец образа в GHCR (по умолчанию `gorcer`)         |
+| `XSPEED_VERSION`      | тег образа (`:latest`, `0.1.0`, …)                         |
+| `NGINX_SERVER_NAME`   | доменное имя (используется nginx и certbot)               |
+| `CERTBOT_EMAIL`       | контакт для Let's Encrypt                                 |
+| `NGINX_HTTP_PORT`     | порт HTTP на хосте (по умолчанию `80`)                     |
+| `NGINX_HTTPS_PORT`    | порт HTTPS на хосте (по умолчанию `443`)                   |
+
+`JWT_SECRET` генерируется так:
+
+```sh
+openssl rand -hex 32
+```
+
+## CI/CD
+
+CI описан в `.github/workflows/`:
+
+- **`server-ci.yml`** — push/PR в `master`/`dev`, ветвящиеся в
+  изменения под `server/`. Прогоняет `ruff`, `ruff format --check`,
+  `mypy`, `pytest --cov` и собирает Docker-образ
+  `ghcr.io/<owner>/cheburspeed-server` (push в GHCR только на push,
+  не на PR).
+- **`frontend-ci.yml`** — push/PR, ветвящиеся в `frontend/`. Прогоняет
+  `prettier --check`, ESLint, `svelte-check`, `pnpm build` и собирает
+  Docker-образ `ghcr.io/<owner>/cheburspeed-frontend`.
+- **`probe-ci.yml`** — push/PR, ветвящиеся в `probe/`. Прогоняет
+  `ruff`, `pytest` и multi-arch buildx
+  (`linux/amd64,linux/arm64`) для образа
+  `ghcr.io/<owner>/cheburspeed-probe`. После push на `master`/`dev`
+  шаг `verify-manifest` делает `docker buildx imagetools inspect`
+  и проверяет, что манифест содержит обе архитектуры.
+- **`release.yml`** — срабатывает на пуш тега `v*`. Собирает все
+  три образа с тегами `:X.Y.Z` и `:latest`, прикладывает к Release
+  архив `frontend/build/`, генерирует release notes (`git log` от
+  предыдущего тега до HEAD + автоматические GitHub release notes).
+
+Все workflow используют `GITHUB_TOKEN` для входа в GHCR — отдельных
+secrets не нужно. Для авторизации при локальном пуше тега достаточно
+прав `contents: write` и `packages: write`, которые есть у
+мэйнтейнеров репозитория.
+
+### Локальная сборка multi-arch пробы
+
+```sh
+make probe-buildx                       # build + push всех архитектур
+make probe-build                        # одиночная сборка под хост
+make probe-buildx IMAGE_TAG=0.1.0 PROBE_PLATFORMS=linux/arm64
+```
+
+Аналогично для сервера и фронтенда: `make server-buildx`,
+`make frontend-buildx`.
+
+### Релиз новой версии
+
+```sh
+# дерево должно быть чистым
+make release-tag  VERSION=0.1.0
+make release-push VERSION=0.1.0
+# → push v0.1.0 в origin → запускается .github/workflows/release.yml
+# → три Docker-образа с тегами :0.1.0 и :latest в GHCR
+# → GitHub Release с архивом frontend/build
+```
+
+Если удобнее одной командой:
+
+```sh
+git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0
+```
+
+## Добавление пробы
+
+После того как в GHCR появился образ `cheburspeed-probe`, на каждой
+новой машине:
+
+```sh
+docker run -d --name xspeed-probe \
+  --restart unless-stopped \
+  -e SERVER_URL=wss://xspeed.example.com/ws \
+  -e PROBE_TOKEN=<токен из таблицы probes> \
+  -e PROBE_ALIAS=msk-router-1 \
+  -e REGION_CODE=msk \
+  ghcr.io/gorcer/cheburspeed-probe:latest
+```
+
+Токен берётся из колонки `probes.token` (создаётся через
+админку `/admin/probes`). Проба автоматически переподключается
+при обрыве связи (exponential backoff). Без заданного
+`NETWORK_INTERFACE` проба использует любой доступный интерфейс;
+если переменная задана, но интерфейс отсутствует, проба логирует
+warning и пропускает задание со статусом `error="netif_unavailable"`.
 
 ## Документация API
 
-После запуска `server` документация доступна по `/docs` (Swagger UI).
+После запуска `server` Swagger UI доступен по `/docs`.
+
+## Troubleshooting
+
+| Симптом                                                    | Проверка                                                                                  |
+|------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| `prod-up` падает на certbot                                | `make prod-config` — внутри `NGINX_SERVER_NAME` и `CERTBOT_EMAIL` обязательны.            |
+| WebSocket-соединения рвутся через nginx                   | Проверить `proxy_read_timeout` в `nginx-prod.conf.template` (по умолчанию 3600s).         |
+| Healthcheck `server` ругается на `localhost:8000/healthz`  | `docker compose -f docker-compose.prod.yml logs server`; убедиться, что порт 8000 открыт внутри `xspeed_net`. |
+| Проба не подключается                                      | `docker logs xspeed-probe`; `curl -v $SERVER_URL`; проверить, что nginx проксирует `/ws/`. |
+| `docker buildx imagetools inspect …` показывает одну платформу | В workflow включён `setup-qemu-action`; иначе buildx не умеет кросс-архитектуру.        |
+| `compose config` жалуется на `${VAR:?...}`                | В `.env.prod` отсутствует обязательная переменная.                                        |
+
+## Лицензия
+
+MIT.

@@ -1,0 +1,166 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: read
+
+env:
+  PYTHON_VERSION: '3.12'
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+  PROBE_PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.5.x'
+          enable-cache: true
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --- frontend build (SvelteKit) ---
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Archive frontend build
+        run: |
+          mkdir -p dist
+          tar --exclude='node_modules' -czf \
+            dist/xspeed-frontend-build-${{ steps.version.outputs.version }}.tar.gz \
+            -C frontend build
+
+      # --- docker images ---
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-server:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-server:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-frontend:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push probe image (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./probe
+          file: ./probe/Dockerfile
+          platforms: ${{ env.PROBE_PLATFORMS }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-probe:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-probe:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify multi-arch probe manifest
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/cheburspeed-probe:${{ steps.version.outputs.version }}
+
+      # --- release ---
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          PREV_TAG=$(git tag --sort=-v:refname --exclude="v${VERSION}" | head -n1 || true)
+          if [ -z "${PREV_TAG:-}" ]; then
+            RANGE="$(git rev-list --max-parents=0 HEAD)..HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          {
+            echo "## XSpeed v${VERSION}"
+            echo
+            echo "### Docker images"
+            echo
+            echo "| Component | Image |"
+            echo "|-----------|-------|"
+            echo "| Server    | \`ghcr.io/${OWNER}/cheburspeed-server:${VERSION}\` |"
+            echo "| Frontend  | \`ghcr.io/${OWNER}/cheburspeed-frontend:${VERSION}\` |"
+            echo "| Probe     | \`ghcr.io/${OWNER}/cheburspeed-probe:${VERSION}\` (linux/amd64, linux/arm64) |"
+            echo
+            echo "Each image is also published with the \`:latest\` tag."
+            echo
+            echo "### Changes since ${PREV_TAG:-initial commit}"
+            echo
+            git log --pretty=format:'- %s (%h) — %an' "${RANGE}" >> notes.md
+            echo
+          } >> notes.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: v${{ steps.version.outputs.version }}
+          body_path: notes.md
+          files: dist/xspeed-frontend-build-${{ steps.version.outputs.version }}.tar.gz
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
