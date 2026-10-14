@@ -69,9 +69,20 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
         row = await conn.fetchrow(
             """
             SELECT id, link
-            FROM tasks
+            FROM tasks t
             WHERE status = 'pending'
-              AND (probe_tokens IS NULL OR probe_tokens ? $1)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM task_results tr
+                  JOIN probes p ON p.id = tr.probe_id
+                  WHERE tr.task_id = t.id AND p.token = $1
+              )
+              AND (
+                  (probe_tokens IS NULL AND EXISTS (
+                      SELECT 1 FROM probes p WHERE p.token = $1 AND p.is_public
+                  ))
+                  OR probe_tokens ? $1
+              )
             ORDER BY created_at, id
             FOR UPDATE SKIP LOCKED
             LIMIT 1
@@ -100,11 +111,10 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
 async def check_completion(conn: asyncpg.Connection, task_id: int) -> bool:
     """Mark ``task_id`` as ``completed`` when all expected results are in.
 
-    "Expected" is the cardinality of the ``probe_tokens`` whitelist:
-    when the whitelist is missing the task is public and a single
-    result is enough. When the whitelist contains more probes, the
-    task is only flipped to ``completed`` once every distinct probe
-    in the whitelist has reported a result.
+    Expected results are resolved from the server-side probe registry:
+    every public probe for a public task, or every probe whose token is
+    listed in a targeted task. A probe with an existing result is excluded
+    from subsequent claims, so a task progresses through its recipients.
 
     Tasks that still need more results are reset to ``pending`` so
     the next eligible probe can claim them.
@@ -120,13 +130,14 @@ async def check_completion(conn: asyncpg.Connection, task_id: int) -> bool:
         return False
     raw_tokens = task_row["probe_tokens"]
     if raw_tokens is None:
-        expected = 1
-    elif isinstance(raw_tokens, str):
-        # asyncpg returns JSONB columns as a JSON-encoded string by
-        # default; parse it so ``len`` reflects the whitelist size.
-        expected = max(len(json.loads(raw_tokens)), 1)
+        expected = await conn.fetchval("SELECT count(*) FROM probes WHERE is_public")
     else:
-        expected = max(len(raw_tokens), 1)
+        tokens = json.loads(raw_tokens) if isinstance(raw_tokens, str) else raw_tokens
+        expected = await conn.fetchval(
+            "SELECT count(*) FROM probes WHERE token = ANY($1::text[])",
+            list(tokens),
+        )
+    expected = int(expected or 0)
     reported = await conn.fetchval(
         "SELECT count(DISTINCT probe_id) FROM task_results WHERE task_id = $1",
         task_id,
@@ -250,7 +261,20 @@ async def dispatch_to_probe(db: Database, hub: Hub, probe_token: str) -> bool:
         link=claimed.link,
         protocol_version=PROTOCOL_VERSION,
     ).model_dump()
-    return await hub.send(probe_token, message)
+    delivered = await hub.send(probe_token, message)
+    if delivered:
+        return True
+    async with db.pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'pending', assigned_to = NULL, started_at = NULL
+            WHERE id = $1 AND status = 'running' AND assigned_to = $2
+            """,
+            claimed.id,
+            probe_token,
+        )
+    return False
 
 
 async def _sweeper_loop(db: Database) -> None:

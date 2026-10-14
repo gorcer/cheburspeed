@@ -66,18 +66,19 @@ async def _seed_region(code: str = "RU-MOW", title: str = "Москва") -> int
         await conn.close()
 
 
-async def _seed_probe(token: str, region_id: int) -> int:
+async def _seed_probe(token: str, region_id: int, *, is_public: bool = True) -> int:
     conn = await asyncpg.connect(_test_dsn())
     try:
         row = await conn.fetchrow(
             """
             INSERT INTO probes (alias, token, region_id, is_public)
-            VALUES ($1, $2, $3, TRUE)
+            VALUES ($1, $2, $3, $4)
             RETURNING id
             """,
             f"probe-{token[:4]}",
             token,
             region_id,
+            is_public,
         )
         return int(row["id"])
     finally:
@@ -121,6 +122,8 @@ async def test_claim_task_returns_none_when_queue_is_empty(app_db: Database) -> 
 
 async def test_claim_task_picks_oldest_pending_task(app_db: Database) -> None:
     """The oldest pending task is reserved first."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-x", region_id)
     first = await _insert_task(VALID_LINK)
     second = await _insert_task(VALID_LINK)
 
@@ -146,8 +149,22 @@ async def test_claim_task_filters_by_probe_tokens_whitelist(app_db: Database) ->
     assert claimed.id != other_task
 
 
+async def test_claim_task_skips_private_probe_for_public_task(app_db: Database) -> None:
+    """Only probes marked public may consume tasks without a whitelist."""
+    region_id = await _seed_region()
+    await _seed_probe("private-probe", region_id, is_public=False)
+    await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="private-probe")
+
+    assert claimed is None
+
+
 async def test_claim_task_marks_running_with_assigned_to(app_db: Database) -> None:
     """Successful claim updates ``tasks.status`` and ``assigned_to``."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-claim", region_id)
     task_id = await _insert_task(VALID_LINK)
 
     async with app_db.pool.acquire() as conn:
@@ -166,7 +183,9 @@ async def test_dispatch_distributes_tasks_to_probes_without_duplicates(
     app_db: Database,
 ) -> None:
     """Two probes race for three tasks — every probe gets a distinct task."""
-    await _seed_region()
+    region_id = await _seed_region()
+    await _seed_probe("probe-a", region_id)
+    await _seed_probe("probe-b", region_id)
     await _insert_task(VALID_LINK)
     await _insert_task(VALID_LINK)
     await _insert_task(VALID_LINK)
@@ -233,6 +252,7 @@ async def test_check_completion_resets_multi_probe_task_to_pending(
     region_id = await _seed_region()
     task_id = await _insert_task(VALID_LINK, probe_tokens=["probe-a", "probe-b"])
     probe_a = await _seed_probe("probe-a", region_id)
+    probe_b = await _seed_probe("probe-b", region_id)
 
     async with app_db.pool.acquire() as conn:
         await claim_task(conn, probe_token="probe-a")
@@ -255,7 +275,6 @@ async def test_check_completion_resets_multi_probe_task_to_pending(
     assert row["assigned_to"] is None
 
     # Second probe reports — task completes.
-    probe_b = await _seed_probe("probe-b", region_id)
     async with app_db.pool.acquire() as conn:
         claimed_b = await claim_task(conn, probe_token="probe-b")
         assert claimed_b is not None
@@ -276,6 +295,32 @@ async def test_check_completion_resets_multi_probe_task_to_pending(
     assert completed is True
     assert row["status"] == "completed"
     assert row["completed_at"] is not None
+
+
+async def test_completed_probe_cannot_claim_the_same_public_task_again(app_db: Database) -> None:
+    """Public tasks are handed to each eligible probe at most once."""
+    region_id = await _seed_region()
+    first_probe = await _seed_probe("probe-a", region_id)
+    await _seed_probe("probe-b", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        assert await claim_task(conn, probe_token="probe-a") is not None
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=first_probe,
+            region_id=region_id,
+            speed_mbps=8.0,
+            error=None,
+            raw={},
+        )
+        assert await check_completion(conn, task_id) is False
+        assert await claim_task(conn, probe_token="probe-a") is None
+        claimed = await claim_task(conn, probe_token="probe-b")
+
+    assert claimed is not None
+    assert claimed.id == task_id
 
 
 async def test_sweep_resets_stale_running_tasks(app_db: Database) -> None:
@@ -315,6 +360,8 @@ async def test_sweep_resets_stale_running_tasks(app_db: Database) -> None:
 
 async def test_sweep_leaves_recent_running_tasks_alone(app_db: Database) -> None:
     """A task that was just assigned is not yet stale."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-fresh", region_id)
     task_id = await _insert_task(VALID_LINK)
     async with app_db.pool.acquire() as conn:
         await claim_task(conn, probe_token="probe-fresh")

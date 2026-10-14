@@ -176,6 +176,8 @@ async def create_task(
     """Validate the vless link, insert a ``pending`` row and return its id."""
     async with pool.acquire() as conn:
         task_id = await _insert_task(conn, payload.link, payload.probe_tokens)
+    hub = request.app.state.hub
+    await hub.broadcast({"type": "task.created", "payload": {"id": task_id, "status": "pending"}})
     return TaskCreatedResponse(id=task_id, status="pending")
 
 

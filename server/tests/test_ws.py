@@ -122,6 +122,18 @@ def test_ws_closes_with_4001_when_token_unknown(ws_client: Any) -> None:
     assert exc_info.value.code == 4001
 
 
+def test_public_ws_receives_task_created_event(ws_client: Any) -> None:
+    """The browser-facing socket is anonymous and emits live task updates."""
+    with ws_client.websocket_connect("/ws/public") as websocket:
+        response = ws_client.post("/api/v1/tasks", json={"link": VALID_LINK})
+        event = websocket.receive_json()
+
+    assert response.status_code == 201
+    assert event["type"] == "task.created"
+    assert event["payload"]["id"] == response.json()["id"]
+    assert event["payload"]["status"] == "pending"
+
+
 async def test_ws_accepts_probe_with_valid_token_and_assigns_task(
     ws_client: Any,
 ) -> None:

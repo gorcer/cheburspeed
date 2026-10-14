@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 
-const wsBase = (import.meta.env.PUBLIC_WS_BASE ?? '/ws') as string;
+const wsBase = (import.meta.env.PUBLIC_WS_BASE ?? '/ws/public') as string;
 
 export type WsStatus = 'connecting' | 'open' | 'closed';
 

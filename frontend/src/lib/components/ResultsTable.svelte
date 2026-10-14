@@ -1,10 +1,12 @@
 <script lang="ts">
   import { ChevronLeft, ChevronRight } from '@lucide/svelte';
   import { createQuery } from '@tanstack/svelte-query';
+  import { onMount } from 'svelte';
   import { derived, writable } from 'svelte/store';
 
   import { getTask, listTasks, type Task, type TaskList, type TaskSummary } from '$lib/api/tasks';
   import { t, locale } from '$lib/stores/locale.svelte';
+  import { ws } from '$lib/api/ws.svelte';
 
   type Page = { limit: number; offset: number };
 
@@ -93,6 +95,15 @@
   });
 
   const currentPageNumber = $derived(Math.floor(page.offset / page.limit) + 1);
+
+  onMount(() =>
+    ws.on((event) => {
+      if (event.type === 'task.created' || event.type === 'task.updated' || event.type === 'result.added') {
+        void $tasks.refetch();
+        if (expanded !== null) void $detail.refetch();
+      }
+    }),
+  );
 </script>
 
 <section

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { onMount } from 'svelte';
 
   import { getOnlineProbes, type OnlineRegion } from '$lib/api/probes';
   import { t, locale } from '$lib/stores/locale.svelte';
+  import { ws } from '$lib/api/ws.svelte';
   import regions from '../../../static/regions-layout.json';
 
   type RegionLayout = { code: string; title: string; x: number; y: number };
@@ -38,6 +40,12 @@
       selectRegion(region);
     }
   }
+
+  onMount(() =>
+    ws.on((event) => {
+      if (event.type === 'result.added' || event.type === 'region.updated') void $online.refetch();
+    }),
+  );
 </script>
 
 <section aria-labelledby="map-title" class="space-y-4">

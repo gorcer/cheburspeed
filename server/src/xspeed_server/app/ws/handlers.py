@@ -132,6 +132,7 @@ async def handle_online_message(
         client_ip,
         probe["id"],
     )
+    probe["region_id"] = region_id
     logger.info(
         "probe %s announced (alias=%r, region=%r, version=%r, netif=%r)",
         probe["id"],
@@ -146,14 +147,21 @@ async def handle_result_message(
     conn: asyncpg.Connection,
     msg: ResultMessage,
     probe: dict[str, Any],
-) -> bool:
+) -> bool | None:
     """Persist a ``result`` message and trigger completion check.
 
-    Returns ``True`` when the parent task was flipped to
-    ``completed`` as a result of this message — useful for tests and
-    for any future "broadcast to the frontend" hook that might want
-    to skip emitting a redundant update.
+    Returns ``True`` when the parent task was completed, ``False`` for
+    a persisted partial result, and ``None`` when this probe was not
+    assigned the task.
     """
+    assigned = await conn.fetchval(
+        "SELECT 1 FROM tasks WHERE id = $1 AND status = 'running' AND assigned_to = $2",
+        msg.task_id,
+        probe["token"],
+    )
+    if assigned is None:
+        logger.warning("probe %s reported an unassigned task %s", probe["id"], msg.task_id)
+        return None
     await record_result(
         conn,
         task_id=msg.task_id,
@@ -185,6 +193,22 @@ def register_websocket_route(app: Any) -> None:
         await _run_websocket_session(websocket, db)
 
     app.add_api_websocket_route("/ws", endpoint)
+
+    async def public_endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        hub: Hub = websocket.app.state.hub
+        await hub.connect_public(websocket)
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await hub.disconnect_public(websocket)
+
+    app.add_api_websocket_route("/ws/public", public_endpoint)
 
 
 async def _run_websocket_session(websocket: WebSocket, db: Database) -> None:
@@ -244,7 +268,7 @@ async def _run_websocket_session(websocket: WebSocket, db: Database) -> None:
                         logger.warning("invalid result payload: %r", payload)
                         continue
                     try:
-                        await handle_result_message(conn, result, probe)
+                        completed = await handle_result_message(conn, result, probe)
                     except asyncpg.ForeignKeyViolationError:
                         logger.warning(
                             "probe %s reported result for unknown task %s",
@@ -252,9 +276,29 @@ async def _run_websocket_session(websocket: WebSocket, db: Database) -> None:
                             payload.get("task_id"),
                         )
                         continue
+                if completed is not None:
+                    await hub.broadcast(
+                        {
+                            "type": "result.added",
+                            "payload": {
+                                "task_id": result.task_id,
+                                "probe_id": probe["id"],
+                                "region_id": probe["region_id"],
+                                "speed_mbps": result.speed_mbps,
+                                "error": result.error,
+                            },
+                        }
+                    )
+                    if completed:
+                        await hub.broadcast(
+                            {
+                                "type": "task.updated",
+                                "payload": {"id": result.task_id, "status": "completed"},
+                            }
+                        )
                 await dispatch_to_probe(db, hub, token)
             else:
                 logger.debug("ignoring ws message with unknown type=%r", msg_type)
     finally:
-        await hub.disconnect(token)
+        await hub.disconnect(token, websocket)
         logger.info("ws session closed: probe=%s", probe["id"])

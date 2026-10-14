@@ -82,7 +82,7 @@ class OnlineProbesResponse(BaseModel):
 def _row_to_payload(row: Any) -> dict[str, Any]:
     return {
         "online": int(row["online"] or 0),
-        "median_mbps": float(row["median_mbps"]) if row["median_mbps"] else None,
+        "median_mbps": float(row["median_mbps"]) if row["median_mbps"] is not None else None,
         "last_speedtest_at": row["last_speedtest_at"],
     }
 
