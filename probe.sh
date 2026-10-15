@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # probe.sh — manage the XSpeed probe container in this folder.
 #
-#   ./probe.sh create        build image (if missing) and start the probe container
+#   ./probe.sh create        build image (if missing) and start a fresh container
+#   ./probe.sh start         start an already-existing, stopped container
 #   ./probe.sh status        container state + last logs + server-side registration
-#   ./probe.sh stop          stop and remove the probe container
-#   ./probe.sh restart       stop + create
+#   ./probe.sh stop          stop the container (kept on disk; revives via `start`)
+#   ./probe.sh restart       docker restart (stop + start, no image rebuild)
+#   ./probe.sh remove        destroy the container (the old destructive `stop`)
 #   ./probe.sh logs [N]      tail the last N log lines (default 50), follow
 #   ./probe.sh help          this message
 #
@@ -17,7 +19,9 @@
 #   --no-build    skip `docker build` even if the image is missing locally
 #   --pull        `docker pull` $PROBE_IMAGE instead of building
 #
-# Idempotent: running `create` on an already-running container replaces it.
+# Command semantics follow plain docker: `stop` pauses, `start` revives,
+# `remove` destroys. `create` is the full "docker run" — replaces whatever
+# container of the same name already exists.
 
 set -euo pipefail
 
@@ -111,15 +115,47 @@ cmd_create() {
     cmd_status
 }
 
+cmd_start() {
+    require_docker
+    if ! docker container inspect "$PROBE_CONTAINER" >/dev/null 2>&1; then
+        warn "container $PROBE_CONTAINER does not exist — run './probe.sh create' first"
+        return 1
+    fi
+    if docker ps --filter "name=^${PROBE_CONTAINER}$" --format '{{.Names}}' | grep -q .; then
+        echo "$PROBE_CONTAINER is already running"
+        return 0
+    fi
+    say "start $PROBE_CONTAINER"
+    docker start "$PROBE_CONTAINER" >/dev/null
+    ok "started"
+    echo
+    cmd_status
+}
+
 cmd_stop() {
     require_docker
-    if docker container inspect "$PROBE_CONTAINER" >/dev/null 2>&1; then
-        say "stop + remove $PROBE_CONTAINER"
-        docker rm -f "$PROBE_CONTAINER"
-        ok "stopped"
-    else
+    if ! docker container inspect "$PROBE_CONTAINER" >/dev/null 2>&1; then
         echo "$PROBE_CONTAINER is not present"
+        return 0
     fi
+    if ! docker ps --filter "name=^${PROBE_CONTAINER}$" --format '{{.Names}}' | grep -q .; then
+        echo "$PROBE_CONTAINER is already stopped (kept on disk; './probe.sh start' revives it)"
+        return 0
+    fi
+    say "stop $PROBE_CONTAINER (container kept on disk; './probe.sh start' revives it)"
+    docker stop "$PROBE_CONTAINER"
+    ok "stopped"
+}
+
+cmd_remove() {
+    require_docker
+    if ! docker container inspect "$PROBE_CONTAINER" >/dev/null 2>&1; then
+        echo "$PROBE_CONTAINER is not present"
+        return 0
+    fi
+    say "remove $PROBE_CONTAINER"
+    docker rm -f "$PROBE_CONTAINER"
+    ok "removed"
 }
 
 cmd_status() {
@@ -195,8 +231,16 @@ PY
 }
 
 cmd_restart() {
-    cmd_stop || true
-    cmd_create
+    require_docker
+    if ! docker container inspect "$PROBE_CONTAINER" >/dev/null 2>&1; then
+        warn "container $PROBE_CONTAINER does not exist — run './probe.sh create' first"
+        return 1
+    fi
+    say "restart $PROBE_CONTAINER"
+    docker restart "$PROBE_CONTAINER"
+    ok "restarted"
+    echo
+    cmd_status
 }
 
 cmd_logs() {
@@ -215,9 +259,11 @@ cmd_help() {
 cmd="${1:-help}"; shift || true
 case "$cmd" in
     create)  cmd_create "$@" ;;
+    start)   cmd_start "$@" ;;
     stop)    cmd_stop "$@" ;;
     status)  cmd_status "$@" ;;
     restart) cmd_restart "$@" ;;
+    remove|rm) cmd_remove "$@" ;;
     logs)    cmd_logs "$@" ;;
     help|-h|--help) cmd_help ;;
     *) cmd_help; fail "unknown command: $cmd" ;;

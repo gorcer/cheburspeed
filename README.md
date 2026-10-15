@@ -181,25 +181,33 @@ warning и пропускает задание со статусом `error="net
 
 ### Локальное управление пробой (`probe.sh`)
 
-В корне репозитория лежит `probe.sh` — обёртка над `docker run`
-для текущего окружения. Конфигурация берётся из `.env`
-(`PROBE_TOKEN`, `PROBE_REGION`, `PROBE_ALIAS`, `PROBE_SERVER_URL`,
-`PROBE_SPEEDTEST_URL`).
+В корне репозитория лежит `probe.sh` — обёртка над `docker run` /
+`docker start|stop|rm` для текущего окружения. Конфигурация берётся
+из `.env` (`PROBE_TOKEN`, `PROBE_REGION`, `PROBE_ALIAS`,
+`PROBE_SERVER_URL`, `PROBE_SPEEDTEST_URL`).
 
 ```sh
-./probe.sh create    # build образа (если нужно) + запуск контейнера
+./probe.sh create    # build образа (если нужно) + новый контейнер
+./probe.sh start     # поднять уже созданный, но остановленный контейнер
 ./probe.sh status    # docker ps + последние логи + серверная регистрация
-./probe.sh stop      # остановить и удалить контейнер
-./probe.sh restart   # stop + create
+./probe.sh stop      # остановить контейнер (НЕ удалять; revives через start)
+./probe.sh restart   # docker restart (stop + start, без пересборки образа)
+./probe.sh remove    # удалить контейнер (заменяет старое «деструктивное stop»)
 ./probe.sh logs [N]  # `docker logs --tail N -f`
 ```
 
+Семантика `stop` / `start` / `remove` совпадает с plain docker:
+`stop` гасит процесс (контейнер остаётся на диске), `start` —
+`docker start` уже существующего контейнера, `remove` —
+`docker rm -f` для окончательного удаления. `create` идемпотентен:
+повторный запуск снимает существующий контейнер с тем же именем
+и поднимает новый.
+
 `status` дополнительно заходит в `/api/v1/admin/probes` и находит
-запись, чей `token` совпадает с `PROBE_TOKEN` из `.env` (если токен
-не выставлен — ищет по `alias`/`region_code`). Без админ-учётных
-данных или при недоступном сервере этот шаг тихо пропускается.
-`create` идемпотентен: повторный запуск удаляет существующий
-контейнер с тем же именем и поднимает новый.
+запись, чей `token` совпадает с `PROBE_TOKEN` из `.env` (если
+токен не выставлен — ищет по `alias`/`region_code`). Без
+админ-учётных данных или при недоступном сервере этот шаг тихо
+пропускается.
 
 Имя контейнера по умолчанию `xspeed-probe-${PROBE_REGION,,}`;
 переопределяется через `PROBE_CONTAINER` в `.env`.
