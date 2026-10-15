@@ -182,6 +182,8 @@
       "yes": "да",
       "no": "нет",
       "copyToken": "Скопировать токен",
+      "copyTokenCopied": "Токен скопирован",
+      "copyTokenFailed": "Не удалось скопировать — скопируйте вручную",
       "confirmDelete": "Удалить пробу «{{alias}}»?",
       "pageOf": "Стр. {{current}} из {{total}}",
       "prev": "Назад",

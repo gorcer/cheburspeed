@@ -182,6 +182,8 @@
       "yes": "yes",
       "no": "no",
       "copyToken": "Copy token",
+      "copyTokenCopied": "Token copied",
+      "copyTokenFailed": "Copy failed — please copy manually",
       "confirmDelete": "Delete probe «{{alias}}»?",
       "pageOf": "Page {{current}} of {{total}}",
       "prev": "Prev",

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Copy, RefreshCw, Trash2 } from "@lucide/svelte";
+  import { Check, Copy, RefreshCw, Trash2 } from "@lucide/svelte";
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { derived, writable } from "svelte/store";
 
@@ -64,6 +64,7 @@
   let editingId = $state<number | null>(null);
   let editAlias = $state("");
   let editIsPublic = $state(true);
+  let copyState = $state<Record<number, "copied" | "failed" | null>>({});
 
   function resetForm() {
     formAlias = "";
@@ -144,12 +145,62 @@
     }
   }
 
-  async function copyToken(token: string) {
+  async function copyViaExecCommand(text: string): Promise<boolean> {
+    if (typeof document === "undefined") return false;
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "-9999px";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    const previousSelection = document.getSelection();
+    const savedRange =
+      previousSelection && previousSelection.rangeCount > 0
+        ? previousSelection.getRangeAt(0)
+        : null;
+    textarea.select();
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(token);
+      ok = document.execCommand("copy");
     } catch {
-      /* ignore — user can copy manually */
+      ok = false;
     }
+    document.body.removeChild(textarea);
+    if (savedRange && previousSelection) {
+      previousSelection.removeAllRanges();
+      previousSelection.addRange(savedRange);
+    }
+    return ok;
+  }
+
+  async function copyToken(probe: AdminProbe) {
+    let ok = false;
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function" &&
+      window.isSecureContext
+    ) {
+      try {
+        await navigator.clipboard.writeText(probe.token);
+        ok = true;
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      ok = await copyViaExecCommand(probe.token);
+    }
+    copyState = { ...copyState, [probe.id]: ok ? "copied" : "failed" };
+    setTimeout(() => {
+      if (copyState[probe.id] === (ok ? "copied" : "failed")) {
+        const next = { ...copyState };
+        delete next[probe.id];
+        copyState = next;
+      }
+    }, 1800);
   }
 
   function refresh() {
@@ -346,11 +397,34 @@
                     </code>
                     <button
                       type="button"
-                      onclick={() => copyToken(probe.token)}
-                      class="text-surface-content/60 transition hover:text-primary"
+                      onclick={() => copyToken(probe)}
+                      class="text-surface-content/60 transition hover:text-primary disabled:cursor-default disabled:opacity-100"
                       aria-label={t("admin.probes.copyToken")}
+                      title={copyState[probe.id] === "failed"
+                        ? probe.token
+                        : undefined}
                     >
-                      <Copy size={12} aria-hidden="true" />
+                      {#if copyState[probe.id] === "copied"}
+                        <Check
+                          size={12}
+                          class="text-success"
+                          aria-hidden="true"
+                        />
+                        <span class="sr-only"
+                          >{t("admin.probes.copyTokenCopied")}</span
+                        >
+                      {:else if copyState[probe.id] === "failed"}
+                        <Copy
+                          size={12}
+                          class="text-danger"
+                          aria-hidden="true"
+                        />
+                        <span class="sr-only"
+                          >{t("admin.probes.copyTokenFailed")}</span
+                        >
+                      {:else}
+                        <Copy size={12} aria-hidden="true" />
+                      {/if}
                     </button>
                   </div>
                 </td>
