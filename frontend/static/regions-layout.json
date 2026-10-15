@@ -4,7 +4,8 @@
     "label": "СПБ",
     "title": "Санкт-Петербург",
     "row": 1,
-    "col": 1
+    "col": 1,
+    "db_code": "SP"
   },
   {
     "code": "RU-MUR",
@@ -13,7 +14,14 @@
     "row": 1,
     "col": 5
   },
-  { "code": "RU-MOW", "label": "МСК", "title": "Москва", "row": 2, "col": 1 },
+  {
+    "code": "RU-MOW",
+    "label": "МСК",
+    "title": "Москва",
+    "row": 2,
+    "col": 1,
+    "db_code": "MS"
+  },
   {
     "code": "RU-KR",
     "label": "КАР",
@@ -215,7 +223,8 @@
     "label": "ХБР",
     "title": "Хабаровский край",
     "row": 4,
-    "col": 17
+    "col": 17,
+    "db_code": "HA"
   },
   {
     "code": "RU-SAK",
@@ -257,7 +266,8 @@
     "label": "НЖГ",
     "title": "Нижегородская область",
     "row": 5,
-    "col": 7
+    "col": 7,
+    "db_code": "NN"
   },
   {
     "code": "RU-CU",
@@ -271,7 +281,8 @@
     "label": "ТАТ",
     "title": "Республика Татарстан",
     "row": 5,
-    "col": 9
+    "col": 9,
+    "db_code": "KZN"
   },
   {
     "code": "RU-UD",
@@ -285,7 +296,8 @@
     "label": "СВР",
     "title": "Свердловская область",
     "row": 5,
-    "col": 11
+    "col": 11,
+    "db_code": "YE"
   },
   {
     "code": "RU-KGN",
@@ -299,7 +311,8 @@
     "label": "НВС",
     "title": "Новосибирская область",
     "row": 5,
-    "col": 13
+    "col": 13,
+    "db_code": "NS"
   },
   {
     "code": "RU-KK",
@@ -418,7 +431,8 @@
     "label": "ПРИ",
     "title": "Приморский край",
     "row": 6,
-    "col": 17
+    "col": 17,
+    "db_code": "PK"
   },
   {
     "code": "RU-KUR",
@@ -537,14 +551,16 @@
     "label": "КРД",
     "title": "Краснодарский край",
     "row": 9,
-    "col": 5
+    "col": 5,
+    "db_code": "KD"
   },
   {
     "code": "RU-ROS",
     "label": "РОС",
     "title": "Ростовская область",
     "row": 9,
-    "col": 6
+    "col": 6,
+    "db_code": "RO"
   },
   {
     "code": "RU-KL",

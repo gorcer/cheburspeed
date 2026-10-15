@@ -13,6 +13,7 @@
     title: string;
     row: number;
     col: number;
+    db_code?: string;
   };
 
   const GRID_COLS = 19;
@@ -106,7 +107,8 @@
         aria-label={t('map.title')}
       >
         {#each regions as region (region.code)}
-          {@const info = live[region.code]}
+          {@const lookupCode = region.db_code ?? region.code}
+          {@const info = live[lookupCode]}
           {@const speed = info?.median_mbps ?? null}
           {@const isSelected = selectedCode === region.code}
           <button
@@ -136,7 +138,7 @@
   </div>
 
   {#if selectedRegion}
-    {@const info = live[selectedRegion.code]}
+    {@const info = live[selectedRegion.db_code ?? selectedRegion.code]}
     <div
       class="rounded-card border border-surface-300 bg-surface-200/60 p-4 text-sm text-surface-content"
       aria-live="polite"
