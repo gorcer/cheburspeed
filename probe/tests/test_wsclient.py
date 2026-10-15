@@ -314,3 +314,31 @@ async def test_client_reconnects_after_disconnect(fake_connect) -> None:
 
     assert len(sockets) >= 2
     assert json.loads(sockets[1].sent[0])["type"] == "online"
+
+
+async def test_client_resends_online_to_poll_queue(fake_connect: Any) -> None:
+    _connect, sockets = fake_connect
+
+    settings = _settings(idle_keepalive_seconds=0.05)
+    client = ProbeClient(settings, on_task=lambda *_: (None, None))
+    runner = asyncio.create_task(client.run_forever())
+
+    try:
+        for _ in range(50):
+            if sockets and sockets[-1].sent:
+                break
+            await asyncio.sleep(0.01)
+        # After at least one keepalive tick the probe must have
+        # re-sent its ``online`` handshake without any server push.
+        for _ in range(100):
+            sent = sockets[0].sent
+            if len([m for m in sent if json.loads(m)["type"] == "online"]) >= 2:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        client.stop()
+        await client.close()
+        await asyncio.wait_for(runner, timeout=1.0)
+
+    online_sends = [json.loads(m) for m in sockets[0].sent if json.loads(m)["type"] == "online"]
+    assert len(online_sends) >= 2

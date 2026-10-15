@@ -52,6 +52,14 @@ class ProbeSettings(BaseSettings):
     speedtest_timeout: float = Field(default=30.0, gt=0.0)
     reconnect_initial_delay: float = Field(default=1.0, ge=0.1)
     reconnect_max_delay: float = Field(default=30.0, ge=1.0)
+    idle_keepalive_seconds: float = Field(
+        default=5.0,
+        gt=0.0,
+        description=(
+            "Interval at which the probe re-sends its ``online`` message "
+            "so the server polls the task queue while the probe is idle."
+        ),
+    )
     log_level: str = Field(default="INFO")
     version: str = Field(default="0.1.0")
 

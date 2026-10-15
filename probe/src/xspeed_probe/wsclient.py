@@ -109,21 +109,49 @@ class ProbeClient:
         ) as ws:
             self._ws = ws
             await self._send_online(ws)
-            while not self._stop_event.is_set():
+            keepalive = asyncio.create_task(self._idle_keepalive_loop(ws), name="probe-keepalive")
+            try:
+                while not self._stop_event.is_set():
+                    try:
+                        raw = await ws.recv()
+                    except ConnectionClosed:
+                        logger.info("ws closed by server")
+                        return
+                    payload = _decode(raw)
+                    if payload is None:
+                        continue
+                    msg_type = payload.get("type")
+                    if msg_type == "task.assigned":
+                        await self._handle_task(ws, payload)
+                    else:
+                        logger.debug("ignoring ws message with type=%r", msg_type)
+            finally:
+                keepalive.cancel()
                 try:
-                    raw = await ws.recv()
-                except ConnectionClosed:
-                    logger.info("ws closed by server")
-                    return
-                payload = _decode(raw)
-                if payload is None:
-                    continue
-                msg_type = payload.get("type")
-                if msg_type == "task.assigned":
-                    await self._handle_task(ws, payload)
-                else:
-                    logger.debug("ignoring ws message with type=%r", msg_type)
+                    await keepalive
+                except asyncio.CancelledError:
+                    pass
             self._ws = None
+
+    async def _idle_keepalive_loop(self, ws: ClientConnection) -> None:
+        """Periodically re-announce so the server polls for work.
+
+        The server only calls :func:`dispatch_to_probe` from the
+        ``online`` and ``result`` handlers, so an idle probe would
+        otherwise miss tasks added to the queue while it sits in
+        ``ws.recv()``. Re-sending ``online`` every few seconds is the
+        smallest change that keeps the probe busy without adding a new
+        protocol message.
+        """
+        interval = self._settings.idle_keepalive_seconds
+        try:
+            while not self._stop_event.is_set():
+                await asyncio.sleep(interval)
+                await self._send_online(ws)
+        except asyncio.CancelledError:
+            raise
+        except ConnectionClosed:
+            return
 
     async def _send_online(self, ws: ClientConnection) -> None:
         """Send the ``online`` handshake required by the server."""
