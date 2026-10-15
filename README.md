@@ -179,6 +179,31 @@ docker run -d --name xspeed-probe \
 если переменная задана, но интерфейс отсутствует, проба логирует
 warning и пропускает задание со статусом `error="netif_unavailable"`.
 
+### Локальное управление пробой (`probe.sh`)
+
+В корне репозитория лежит `probe.sh` — обёртка над `docker run`
+для текущего окружения. Конфигурация берётся из `.env`
+(`PROBE_TOKEN`, `PROBE_REGION`, `PROBE_ALIAS`, `PROBE_SERVER_URL`,
+`PROBE_SPEEDTEST_URL`).
+
+```sh
+./probe.sh create    # build образа (если нужно) + запуск контейнера
+./probe.sh status    # docker ps + последние логи + серверная регистрация
+./probe.sh stop      # остановить и удалить контейнер
+./probe.sh restart   # stop + create
+./probe.sh logs [N]  # `docker logs --tail N -f`
+```
+
+`status` дополнительно заходит в `/api/v1/admin/probes` и находит
+запись, чей `token` совпадает с `PROBE_TOKEN` из `.env` (если токен
+не выставлен — ищет по `alias`/`region_code`). Без админ-учётных
+данных или при недоступном сервере этот шаг тихо пропускается.
+`create` идемпотентен: повторный запуск удаляет существующий
+контейнер с тем же именем и поднимает новый.
+
+Имя контейнера по умолчанию `xspeed-probe-${PROBE_REGION,,}`;
+переопределяется через `PROBE_CONTAINER` в `.env`.
+
 ## Документация API
 
 После запуска `server` Swagger UI доступен по `/docs`.
