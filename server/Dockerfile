@@ -21,7 +21,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 
 RUN pip install --no-cache-dir uv \
- && uv sync --no-dev --frozen
+ && uv sync --no-dev
 
 EXPOSE 8000
 
