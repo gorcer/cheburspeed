@@ -173,7 +173,6 @@ class ProbeClient:
             "task_id": task_id,
             "speed_mbps": speed_mbps,
             "error": error,
-            "protocol_version": 1,
         }
         try:
             await ws.send(json.dumps(payload))

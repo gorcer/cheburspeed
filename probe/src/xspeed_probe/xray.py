@@ -18,10 +18,11 @@ import os
 import shlex
 import socket
 import subprocess
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -29,8 +30,71 @@ from urllib.parse import parse_qs, unquote, urlparse
 logger = logging.getLogger(__name__)
 
 
+def _reap_xray(
+    proc: subprocess.Popen[bytes],
+    stderr_handle: Any,
+    task_id: int,
+) -> None:
+    """Wait for ``proc`` to exit, escalating to ``SIGKILL`` if needed.
+
+    Runs in a daemon thread so the asyncio event loop stays free
+    while xray tears down. Closes the stderr capture file and
+    removes its on-disk copy after the process has actually exited,
+    so we never yank the file from under a still-running writer.
+    """
+    try:
+        proc.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "xray did not exit after SIGKILL (task=%s, pid=%s)",
+                task_id,
+                proc.pid,
+            )
+    if stderr_handle is not None:
+        try:
+            stderr_handle.close()
+        except OSError:
+            logger.exception("failed to close xray stderr log (task=%s)", task_id)
+        path = getattr(stderr_handle, "name", None)
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                logger.exception("failed to remove %s", path)
+
+
 class VlessUriError(ValueError):
     """Raised when a vless:// URI cannot be parsed into a config."""
+
+
+def _first(raw_query: dict[str, list[str]], key: str, default: str = "") -> str:
+    values = raw_query.get(key)
+    if not values:
+        return default
+    return values[0]
+
+
+def _parse_extra_json(raw: str) -> dict[str, Any] | None:
+    """Decode the ``extra=...`` query value of a vless URI.
+
+    Operators commonly encode it as a URL-encoded JSON object
+    (e.g. ``{"mode":"auto","xPaddingBytes":"100-1000"}``). An empty or
+    malformed value is reported as ``None`` rather than raising so that
+    call sites can decide whether the field is mandatory.
+    """
+    if not raw:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return decoded
 
 
 @dataclass(slots=True)
@@ -46,7 +110,13 @@ class VlessEndpoint:
     type_: str
     path: str
     host_header: str
-    raw_query: dict[str, list[str]]
+    raw_query: dict[str, list[str]] = field(default_factory=dict)
+    mode: str = ""
+    extra: dict[str, Any] | None = None
+    pbk: str = ""
+    sid: str = ""
+    spx: str = ""
+    fp: str = ""
 
     @classmethod
     def from_uri(cls, uri: str) -> VlessEndpoint:
@@ -79,17 +149,30 @@ class VlessEndpoint:
             key: [unquote(v) for v in values]
             for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
         }
+        type_ = _first(decoded_query, "type", "tcp").lower()
+        host_header = _first(decoded_query, "host")
+        sni = _first(decoded_query, "sni") or host
+        security = _first(decoded_query, "security", "none").lower()
+        mode = _first(decoded_query, "mode")
+        extra_raw = _first(decoded_query, "extra")
+        extra = _parse_extra_json(extra_raw) if extra_raw else None
         return cls(
             uuid=uuid,
             host=host,
             port=port,
-            security=(decoded_query.get("security") or ["none"])[0].lower(),
-            sni=(decoded_query.get("sni") or [host])[0],
-            flow=(decoded_query.get("flow") or [""])[0],
-            type_=(decoded_query.get("type") or ["tcp"])[0].lower(),
-            path=decoded_query.get("path", [""])[0],
-            host_header=(decoded_query.get("host") or [""])[0],
+            security=security,
+            sni=sni,
+            flow=_first(decoded_query, "flow"),
+            type_=type_,
+            path=_first(decoded_query, "path"),
+            host_header=host_header,
             raw_query=decoded_query,
+            mode=mode,
+            extra=extra,
+            pbk=_first(decoded_query, "pbk"),
+            sid=_first(decoded_query, "sid"),
+            spx=_first(decoded_query, "spx"),
+            fp=_first(decoded_query, "fp"),
         )
 
 
@@ -105,6 +188,20 @@ def build_xray_config(
     https://xtls.github.io/config/ — a single vless outbound pointed at
     the remote server and a single SOCKS5 inbound that the probe's
     HTTP client then dials through.
+
+    Supports the transports operators actually use:
+
+    * ``network: tcp`` (no transport-specific block).
+    * ``network: ws`` with optional ``path`` and ``Host`` header.
+    * ``network: xhttp`` (the modern HTTP-based transport) with
+      ``mode``, ``path``, optional ``Host`` and an arbitrary
+      ``extra`` object (``xPaddingBytes`` etc.).
+
+    Security is split cleanly between TLS and REALITY — xray rejects
+    a config that mixes them, so we emit ``tlsSettings`` for ``tls``
+    and ``realitySettings`` for ``reality`` (with no
+    ``tlsSettings`` at all, since REALITY owns the TLS handshake
+    itself).
     """
     stream_settings: dict[str, Any] = {"network": endpoint.type_ or "tcp"}
     if endpoint.type_ == "ws":
@@ -114,15 +211,39 @@ def build_xray_config(
         if endpoint.host_header:
             ws_settings["host"] = endpoint.host_header
         stream_settings["wsSettings"] = ws_settings
-    if endpoint.security in ("tls", "reality"):
-        tls_settings: dict[str, Any] = {
+    elif endpoint.type_ == "xhttp":
+        xhttp_settings: dict[str, Any] = {}
+        if endpoint.path:
+            xhttp_settings["path"] = endpoint.path
+        if endpoint.host_header:
+            xhttp_settings["host"] = endpoint.host_header
+        if endpoint.mode:
+            xhttp_settings["mode"] = endpoint.mode
+        if endpoint.extra:
+            stripped = {key: value for key, value in endpoint.extra.items() if key != "mode"}
+            if stripped:
+                xhttp_settings["extra"] = stripped
+        stream_settings["xhttpSettings"] = xhttp_settings
+    if endpoint.security == "tls":
+        stream_settings["security"] = "tls"
+        stream_settings["tlsSettings"] = {
             "serverName": endpoint.sni,
             "allowInsecure": False,
         }
-        if endpoint.security == "reality":
-            tls_settings["alpn"] = ["h2", "http/1.1"]
-        stream_settings["security"] = endpoint.security
-        stream_settings["tlsSettings"] = tls_settings
+    elif endpoint.security == "reality":
+        reality_settings: dict[str, Any] = {
+            "serverName": endpoint.sni,
+        }
+        if endpoint.fp:
+            reality_settings["fingerprint"] = endpoint.fp
+        if endpoint.sid:
+            reality_settings["shortId"] = endpoint.sid
+        if endpoint.pbk:
+            reality_settings["password"] = endpoint.pbk
+        if endpoint.spx:
+            reality_settings["spiderX"] = endpoint.spx
+        stream_settings["security"] = "reality"
+        stream_settings["realitySettings"] = reality_settings
     return {
         "log": {"loglevel": "warning"},
         "inbounds": [
@@ -194,6 +315,8 @@ class XrayManager:
         self._poll_interval = poll_interval
         self._processes: dict[int, subprocess.Popen[bytes]] = {}
         self._configs: dict[int, Path] = {}
+        self._stderr_logs: dict[int, Path] = {}
+        self._stderr_files: dict[int, Any] = {}
 
     @property
     def socks_url(self) -> str:
@@ -214,6 +337,9 @@ class XrayManager:
         )
         config_path = self._config_dir / f"xray-{task_id}.json"
         write_config(config, config_path)
+        stderr_path = self._config_dir / f"xray-{task_id}.log"
+        stderr_path.unlink(missing_ok=True)
+        stderr_file = stderr_path.open("w", encoding="utf-8")
         cmd = [self._xray_binary, "run", "-c", str(config_path)]
         logger.info(
             "starting xray for task %s: %s",
@@ -222,11 +348,13 @@ class XrayManager:
         )
         proc = subprocess.Popen(  # noqa: S603 - input is parsed vless URI, validated above
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=stderr_file,
+            stderr=subprocess.STDOUT,
         )
         self._processes[task_id] = proc
         self._configs[task_id] = config_path
+        self._stderr_logs[task_id] = stderr_path
+        self._stderr_files[task_id] = stderr_file
         return config_path
 
     async def wait_ready(self, task_id: int) -> bool:
@@ -241,11 +369,7 @@ class XrayManager:
             return False
         while time.monotonic() < deadline:
             if proc.poll() is not None:
-                logger.warning(
-                    "xray exited before becoming ready (task=%s, code=%s)",
-                    task_id,
-                    proc.returncode,
-                )
+                self._log_xray_failure(task_id, proc.returncode)
                 return False
             try:
                 reader, writer = await asyncio.open_connection(
@@ -269,28 +393,78 @@ class XrayManager:
         return False
 
     def terminate(self, task_id: int) -> None:
-        """Stop xray for ``task_id`` and remove its on-disk config."""
+        """Stop xray for ``task_id`` and remove its on-disk config.
+
+        Sending the kill signal is synchronous, but waiting for xray to
+        actually exit is performed in a background thread so the
+        asyncio event loop that called us is never blocked. xray
+        occasionally takes a few hundred milliseconds to honour
+        ``SIGTERM``; on the off chance it ignores it entirely we
+        escalate to ``SIGKILL`` after five seconds. Any leftover
+        process is left for ``terminate_all`` or process exit to
+        clean up.
+
+        The stderr capture file is left on disk until the next start
+        of the same task — closing it here while xray is still
+        writing would either corrupt the stream or leak the file
+        descriptor. The next ``start`` removes any stale copy.
+        """
         proc = self._processes.pop(task_id, None)
+        stderr_handle = self._stderr_files.pop(task_id, None)
         if proc is not None and proc.poll() is None:
             proc.terminate()
+            threading.Thread(
+                target=_reap_xray,
+                args=(proc, stderr_handle, task_id),
+                daemon=True,
+                name=f"xspeed-reap-{task_id}",
+            ).start()
+        elif stderr_handle is not None:
             try:
-                proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                logger.warning("xray did not exit on SIGTERM, killing (task=%s)", task_id)
-                proc.kill()
-                proc.wait(timeout=2.0)
+                stderr_handle.close()
+            except OSError:
+                logger.exception("failed to close xray stderr log (task=%s)", task_id)
         config_path = self._configs.pop(task_id, None)
         if config_path is not None:
             try:
                 config_path.unlink(missing_ok=True)
             except OSError:
                 logger.exception("failed to remove %s", config_path)
+        self._stderr_logs.pop(task_id, None)
 
     def terminate_all(self) -> None:
         """Stop every xray started through this manager."""
         task_ids = list(self._processes)
         for task_id in task_ids:
             self.terminate(task_id)
+
+    def _log_xray_failure(self, task_id: int, returncode: int | None) -> None:
+        """Log xray's stderr when it exited before the SOCKS port came up."""
+        stderr_path = self._stderr_logs.get(task_id)
+        if stderr_path is None or not stderr_path.exists():
+            logger.warning(
+                "xray exited before becoming ready (task=%s, code=%s)",
+                task_id,
+                returncode,
+            )
+            return
+        try:
+            tail = stderr_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            logger.warning(
+                "xray exited before becoming ready (task=%s, code=%s) "
+                "and its log could not be read",
+                task_id,
+                returncode,
+                exc_info=True,
+            )
+            return
+        logger.warning(
+            "xray exited before becoming ready (task=%s, code=%s): %s",
+            task_id,
+            returncode,
+            tail or "<empty log>",
+        )
 
     @contextmanager
     def task(self, task_id: int, link: str) -> Iterator[Path]:

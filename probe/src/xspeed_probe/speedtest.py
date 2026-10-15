@@ -83,7 +83,13 @@ async def measure(
                             received_first_byte = True
                         bytes_downloaded += len(chunk)
         except httpx.HTTPError as exc:
-            raise SpeedtestError(f"http error: {exc}") from exc
+            details = (
+                f"{type(exc).__name__}: {exc}"
+                if exc.args
+                else f"{type(exc).__name__}: <no message>"
+            )
+            logger.warning("speedtest failed: %s", details)
+            raise SpeedtestError(f"http error: {details}") from exc
         except TimeoutError as exc:
             raise SpeedtestError(f"speedtest timed out after {timeout_seconds}s") from exc
     if not received_first_byte:
