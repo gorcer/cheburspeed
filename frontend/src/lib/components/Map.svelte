@@ -1,11 +1,12 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
+  import { derived } from 'svelte/store';
 
   import { getOnlineProbes, type OnlineRegion } from '$lib/api/probes';
   import { getTask, type Task, type TaskResult } from '$lib/api/tasks';
   import { ws } from '$lib/api/ws.svelte';
-  import { currentTask } from '$lib/stores/currentTask.svelte';
+  import { currentTaskId } from '$lib/stores/currentTask.svelte';
   import { locale, t } from '$lib/stores/locale.svelte';
   import regions from '../../../static/regions-layout.json';
 
@@ -39,15 +40,19 @@
     ($online.data?.regions ?? {}) as Record<string, OnlineRegion>,
   );
 
-  const currentTaskQuery = createQuery({
-    queryKey: ['currentTask', currentTask.id] as const,
+  const currentTaskOptions = derived(currentTaskId, ($id) => ({
+    queryKey: ['currentTask', $id] as const,
     queryFn: () =>
-      currentTask.id === null
-        ? Promise.resolve<Task | null>(null)
-        : getTask(currentTask.id),
-    enabled: currentTask.id !== null,
+      $id === null ? Promise.resolve<Task | null>(null) : getTask($id),
+    enabled: $id !== null,
     refetchInterval: 30_000,
-  });
+  }));
+  const currentTaskQuery = createQuery<
+    Task | null,
+    Error,
+    Task | null,
+    readonly ['currentTask', number | null]
+  >(currentTaskOptions);
 
   const currentResultByRegionCode = $derived.by(() => {
     const map = new Map<string, TaskResult>();
@@ -58,7 +63,7 @@
   });
 
   const taskActive = $derived(
-    currentTask.id !== null &&
+    $currentTaskId !== null &&
       ($currentTaskQuery.data?.status === 'pending' ||
         $currentTaskQuery.data?.status === 'running'),
   );
@@ -91,7 +96,7 @@
     if (taskActive && onlineInfo && onlineInfo.online > 0) {
       return { speed: null, blinking: true };
     }
-    return { speed: onlineInfo?.median_mbps ?? null, blinking: false };
+    return { speed: null, blinking: false };
   }
 
   const legendItems = $derived([

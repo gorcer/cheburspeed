@@ -1,21 +1,26 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
+  import { derived } from 'svelte/store';
 
   import { getTask, type Task, type TaskResult } from '$lib/api/tasks';
   import { ws } from '$lib/api/ws.svelte';
-  import { currentTask } from '$lib/stores/currentTask.svelte';
+  import { currentTaskId } from '$lib/stores/currentTask.svelte';
   import { locale, t } from '$lib/stores/locale.svelte';
 
-  const currentTaskQuery = createQuery({
-    queryKey: ['currentTask', currentTask.id] as const,
+  const currentTaskOptions = derived(currentTaskId, ($id) => ({
+    queryKey: ['currentTask', $id] as const,
     queryFn: () =>
-      currentTask.id === null
-        ? Promise.resolve<Task | null>(null)
-        : getTask(currentTask.id),
-    enabled: currentTask.id !== null,
+      $id === null ? Promise.resolve<Task | null>(null) : getTask($id),
+    enabled: $id !== null,
     refetchInterval: 15_000,
-  });
+  }));
+  const currentTaskQuery = createQuery<
+    Task | null,
+    Error,
+    Task | null,
+    readonly ['currentTask', number | null]
+  >(currentTaskOptions);
 
   const results = $derived($currentTaskQuery.data?.results ?? []);
 
@@ -92,7 +97,7 @@
     {/if}
   </div>
 
-  {#if currentTask.id === null}
+  {#if $currentTaskId === null}
     <p class="text-sm text-surface-content/60">{t('results.empty')}</p>
   {:else if $currentTaskQuery.isLoading}
     <p class="text-sm text-surface-content/60">{t('common.loading')}</p>

@@ -2,7 +2,7 @@
   import { Link2 } from '@lucide/svelte';
 
   import { createTask, ApiError } from '$lib/api/tasks';
-  import { currentTask } from '$lib/stores/currentTask.svelte';
+  import { currentTaskId } from '$lib/stores/currentTask.svelte';
   import { t, locale } from '$lib/stores/locale.svelte';
 
   let { onSubmitted }: { onSubmitted?: () => void } = $props();
@@ -24,7 +24,7 @@
     submitting = true;
     try {
       const created = await createTask(value);
-      currentTask.set(created.id);
+      currentTaskId.set(created.id);
       onSubmitted?.();
     } catch (error) {
       if (error instanceof ApiError) {
