@@ -3,7 +3,9 @@
   import { onMount } from 'svelte';
 
   import { getOnlineProbes, type OnlineRegion } from '$lib/api/probes';
+  import { getTask, type Task, type TaskResult } from '$lib/api/tasks';
   import { ws } from '$lib/api/ws.svelte';
+  import { currentTask } from '$lib/stores/currentTask.svelte';
   import { locale, t } from '$lib/stores/locale.svelte';
   import regions from '../../../static/regions-layout.json';
 
@@ -14,6 +16,11 @@
     row: number;
     col: number;
     db_code?: string;
+  };
+
+  type TileState = {
+    speed: number | null;
+    blinking: boolean;
   };
 
   const GRID_COLS = 19;
@@ -32,11 +39,39 @@
     ($online.data?.regions ?? {}) as Record<string, OnlineRegion>,
   );
 
+  const currentTaskQuery = createQuery({
+    queryKey: ['currentTask', currentTask.id] as const,
+    queryFn: () =>
+      currentTask.id === null
+        ? Promise.resolve<Task | null>(null)
+        : getTask(currentTask.id),
+    enabled: currentTask.id !== null,
+    refetchInterval: 30_000,
+  });
+
+  const currentResultByRegionCode = $derived.by(() => {
+    const map = new Map<string, TaskResult>();
+    for (const result of $currentTaskQuery.data?.results ?? []) {
+      map.set(result.region_code, result);
+    }
+    return map;
+  });
+
+  const taskActive = $derived(
+    currentTask.id !== null &&
+      ($currentTaskQuery.data?.status === 'pending' ||
+        $currentTaskQuery.data?.status === 'running'),
+  );
+
   let selectedCode = $state<string | null>(null);
 
   function selectRegion(region: RegionLayout) {
     selectedCode = region.code;
     onSelect?.(region);
+  }
+
+  function tileStyle(region: RegionLayout): string {
+    return `grid-column: ${region.col}; grid-row: ${region.row};`;
   }
 
   function speedClass(speed: number | null): string {
@@ -46,8 +81,17 @@
     return 'bg-success text-neutral-950';
   }
 
-  function tileStyle(region: RegionLayout): string {
-    return `grid-column: ${region.col}; grid-row: ${region.row};`;
+  function regionTileState(region: RegionLayout): TileState {
+    const lookupCode = region.db_code ?? region.code;
+    const result = currentResultByRegionCode.get(lookupCode);
+    if (result) {
+      return { speed: result.speed_mbps, blinking: false };
+    }
+    const onlineInfo = live[lookupCode];
+    if (taskActive && onlineInfo && onlineInfo.online > 0) {
+      return { speed: null, blinking: true };
+    }
+    return { speed: onlineInfo?.median_mbps ?? null, blinking: false };
   }
 
   const legendItems = $derived([
@@ -67,12 +111,15 @@
       : null,
   );
 
-  onMount(() =>
-    ws.on((event) => {
-      if (event.type === 'result.added' || event.type === 'region.updated')
+  onMount(() => {
+    const off = ws.on((event) => {
+      if (event.type === 'result.added' || event.type === 'task.updated') {
         void $online.refetch();
-    }),
-  );
+        void $currentTaskQuery.refetch();
+      }
+    });
+    return off;
+  });
 </script>
 
 <section aria-labelledby="map-title" class="space-y-4">
@@ -107,17 +154,17 @@
         aria-label={t('map.title')}
       >
         {#each regions as region (region.code)}
-          {@const lookupCode = region.db_code ?? region.code}
-          {@const info = live[lookupCode]}
-          {@const speed = info?.median_mbps ?? null}
+          {@const state = regionTileState(region)}
           {@const isSelected = selectedCode === region.code}
           <button
             type="button"
             class="{speedClass(
-              speed,
+              state.speed,
             )} flex items-center justify-center rounded-sm text-[9px] font-semibold leading-none transition outline-none select-none sm:text-[10px] {isSelected
               ? 'ring-2 ring-primary ring-offset-1 ring-offset-surface-200'
-              : 'hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary'}"
+              : 'hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary'} {state.blinking
+              ? 'animate-pulse ring-2 ring-primary/60 ring-offset-1 ring-offset-surface-200'
+              : ''}"
             style={tileStyle(region)}
             aria-label={region.title}
             aria-pressed={isSelected}
@@ -138,7 +185,7 @@
   </div>
 
   {#if selectedRegion}
-    {@const info = live[selectedRegion.db_code ?? selectedRegion.code]}
+    {@const state = regionTileState(selectedRegion)}
     <div
       class="rounded-card border border-surface-300 bg-surface-200/60 p-4 text-sm text-surface-content"
       aria-live="polite"
@@ -150,9 +197,10 @@
         })}
       </div>
       <div class="mt-1 text-surface-content/70">
-        {t('map.online', { count: info?.online ?? 0 })}
-        {#if info?.median_mbps !== null && info?.median_mbps !== undefined}
-          · {t('map.median', { value: info.median_mbps.toFixed(1) })}
+        {#if state.speed !== null}
+          · {t('map.median', { value: state.speed.toFixed(1) })}
+        {:else if state.blinking}
+          · {t('map.pending')}
         {:else}
           · {t('map.noResults')}
         {/if}

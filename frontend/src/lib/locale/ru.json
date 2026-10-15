@@ -30,19 +30,12 @@
     "selected": "Выбран регион: {{title}} ({{code}})",
     "online": "онлайн: {{count}}",
     "median": "медиана: {{value}} Мбит/с",
-    "noResults": "нет данных"
+    "noResults": "нет данных",
+    "pending": "ожидание…"
   },
   "results": {
-    "title": "Последние проверки",
+    "title": "Текущая проверка",
     "empty": "Задач пока нет. Введите ссылку выше, чтобы запустить первую проверку.",
-    "columns": {
-      "id": "ID",
-      "link": "Ссылка",
-      "status": "Статус",
-      "probes": "Пробы",
-      "created": "Создано",
-      "completed": "Завершено"
-    },
     "status": {
       "pending": "в очереди",
       "running": "выполняется",
@@ -50,18 +43,13 @@
       "failed": "ошибка"
     },
     "details": {
-      "title": "Результаты по пробам",
       "empty": "Эта задача ещё не получила результатов.",
       "region": "Регион",
       "probe": "Проба",
       "speed": "Скорость",
       "error": "Ошибка",
+      "created": "Дата теста",
       "speedValue": "{{value}} Мбит/с"
-    },
-    "pagination": {
-      "prev": "Назад",
-      "next": "Вперёд",
-      "page": "Стр. {{page}} из {{total}}"
     }
   },
   "status": {
@@ -212,9 +200,15 @@
       "toggle": "Показать детали",
       "errors": "ошибок",
       "columns": {
+        "id": "ID",
+        "link": "Ссылка",
+        "status": "Статус",
+        "created": "Создано",
+        "completed": "Завершено",
         "results": "Результаты"
       },
       "detail": {
+        "title": "Результаты по пробам",
         "assignedTo": "Назначено",
         "startedAt": "Запущено",
         "completedAt": "Завершено",

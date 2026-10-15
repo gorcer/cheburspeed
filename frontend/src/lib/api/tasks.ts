@@ -7,7 +7,10 @@ export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
 export interface TaskResult {
   id: number;
   probe_id: number;
+  probe_alias: string;
   region_id: number;
+  region_code: string;
+  region_title: string;
   speed_mbps: number | null;
   error: string | null;
   created_at: string;

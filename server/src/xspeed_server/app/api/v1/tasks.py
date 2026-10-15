@@ -70,7 +70,10 @@ class TaskResultItem(BaseModel):
 
     id: int
     probe_id: int
+    probe_alias: str
     region_id: int
+    region_code: str
+    region_title: str
     speed_mbps: float | None
     error: str | None
     created_at: datetime
@@ -143,10 +146,20 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
         return None
     result_rows = await conn.fetch(
         """
-        SELECT id, probe_id, region_id, speed_mbps, error, created_at
-        FROM task_results
-        WHERE task_id = $1
-        ORDER BY created_at ASC
+        SELECT tr.id,
+               tr.probe_id,
+               p.alias AS probe_alias,
+               tr.region_id,
+               r.code AS region_code,
+               r.title AS region_title,
+               tr.speed_mbps,
+               tr.error,
+               tr.created_at
+        FROM task_results tr
+        JOIN probes p ON p.id = tr.probe_id
+        JOIN regions r ON r.id = tr.region_id
+        WHERE tr.task_id = $1
+        ORDER BY tr.created_at ASC
         """,
         task_id,
     )

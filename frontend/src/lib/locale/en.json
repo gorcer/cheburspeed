@@ -30,19 +30,12 @@
     "selected": "Selected region: {{title}} ({{code}})",
     "online": "online: {{count}}",
     "median": "median: {{value}} Mbps",
-    "noResults": "no data"
+    "noResults": "no data",
+    "pending": "pending…"
   },
   "results": {
-    "title": "Recent checks",
+    "title": "Current check",
     "empty": "No tasks yet. Submit a link above to run the first check.",
-    "columns": {
-      "id": "ID",
-      "link": "Link",
-      "status": "Status",
-      "probes": "Probes",
-      "created": "Created",
-      "completed": "Completed"
-    },
     "status": {
       "pending": "pending",
       "running": "running",
@@ -50,18 +43,13 @@
       "failed": "failed"
     },
     "details": {
-      "title": "Per-probe results",
       "empty": "No results received yet.",
       "region": "Region",
       "probe": "Probe",
       "speed": "Speed",
       "error": "Error",
+      "created": "Test date",
       "speedValue": "{{value}} Mbps"
-    },
-    "pagination": {
-      "prev": "Previous",
-      "next": "Next",
-      "page": "Page {{page}} of {{total}}"
     }
   },
   "status": {
@@ -212,9 +200,15 @@
       "toggle": "Toggle details",
       "errors": "errors",
       "columns": {
+        "id": "ID",
+        "link": "Link",
+        "status": "Status",
+        "created": "Created",
+        "completed": "Completed",
         "results": "Results"
       },
       "detail": {
+        "title": "Per-probe results",
         "assignedTo": "Assigned to",
         "startedAt": "Started",
         "completedAt": "Completed",

@@ -277,12 +277,12 @@
         <thead class="text-surface-content/60">
           <tr>
             <th class="w-8 py-2 pr-2"></th>
-            <th class="py-2 pr-3">{t("results.columns.id")}</th>
-            <th class="py-2 pr-3">{t("results.columns.link")}</th>
-            <th class="py-2 pr-3">{t("results.columns.status")}</th>
+            <th class="py-2 pr-3">{t("admin.tasks.columns.id")}</th>
+            <th class="py-2 pr-3">{t("admin.tasks.columns.link")}</th>
+            <th class="py-2 pr-3">{t("admin.tasks.columns.status")}</th>
             <th class="py-2 pr-3">{t("admin.tasks.columns.results")}</th>
-            <th class="py-2 pr-3">{t("results.columns.created")}</th>
-            <th class="py-2 pr-3">{t("results.columns.completed")}</th>
+            <th class="py-2 pr-3">{t("admin.tasks.columns.created")}</th>
+            <th class="py-2 pr-3">{t("admin.tasks.columns.completed")}</th>
           </tr>
         </thead>
         <tbody class="text-surface-content/85">
@@ -392,7 +392,7 @@
                           <h3
                             class="mb-1 text-xs font-medium text-surface-content/80"
                           >
-                            {t("results.details.title")}
+                            {t("admin.tasks.detail.title")}
                           </h3>
                           {#if $detail.data.results.length === 0}
                             <p class="text-surface-content/60">
