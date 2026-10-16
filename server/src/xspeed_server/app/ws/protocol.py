@@ -33,6 +33,15 @@ class TaskAssignedMessage(BaseModel):
     type: Literal["task.assigned"] = "task.assigned"
     task_id: int = Field(..., ge=1)
     link: str = Field(..., min_length=1, max_length=2048)
+    destination_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description=(
+            "Override for the probe's default speedtest URL. When set, the "
+            "probe downloads from this address instead of ``settings.speedtest_url``."
+        ),
+    )
     protocol_version: int = Field(default=PROTOCOL_VERSION, ge=1)
 
 

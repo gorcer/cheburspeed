@@ -10,6 +10,7 @@
   const tabs = $derived([
     { href: "/admin", label: t("admin.tabs.dashboard") },
     { href: "/admin/probes", label: t("admin.tabs.probes") },
+    { href: "/admin/destinations", label: t("admin.tabs.destinations") },
     { href: "/admin/tasks", label: t("admin.tabs.tasks") },
   ]);
 

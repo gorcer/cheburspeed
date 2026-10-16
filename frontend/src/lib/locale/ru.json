@@ -16,7 +16,11 @@
     "submit": "Запустить проверку",
     "submitting": "Отправляем…",
     "errorInvalid": "Ссылка должна начинаться с vless://",
-    "errorNetwork": "Не удалось отправить задачу. Попробуйте позже."
+    "errorNetwork": "Не удалось отправить задачу. Попробуйте позже.",
+    "destinationLabel": "Адрес проверки",
+    "destinationPlaceholder": "— выберите —",
+    "destinationEmpty": "Нет доступных адресов. Сначала добавьте их в админке.",
+    "destinationRequired": "Выберите адрес проверки"
   },
   "map": {
     "title": "Карта регионов",
@@ -86,6 +90,10 @@
         "title": "GET/POST/PUT/DELETE /api/v1/admin/probes",
         "description": "CRUD проб. Токен пробы можно передать явно или сгенерировать автоматически."
       },
+      "destinations": {
+        "title": "GET/POST/PUT/DELETE /api/v1/admin/destinations",
+        "description": "CRUD адресов speedtest. Справочник управляет дропдауном на главной и хранит ссылку для каждого задания."
+      },
       "tasks": {
         "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
         "description": "Список заданий с фильтрами и детали с результатами."
@@ -98,11 +106,11 @@
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
-        "description": "Создать новое задание. Тело: { link, probe_tokens? }."
+        "description": "Создать новое задание. Тело: { link, destination_id, probe_tokens? }."
       },
       "getTask": {
         "title": "GET /api/v1/tasks/{id}",
-        "description": "Получить задание с результатами."
+        "description": "Получить задание с результатами и данными выбранного адреса проверки."
       },
       "listTasks": {
         "title": "GET /api/v1/tasks?limit=&offset=",
@@ -115,10 +123,14 @@
       "onlineProbes": {
         "title": "GET /api/v1/probes/online",
         "description": "Сводка по регионам: онлайн-пробы и медианная скорость."
+      },
+      "listDestinations": {
+        "title": "GET /api/v1/destinations",
+        "description": "Публичный список адресов speedtest для выпадающего списка на главной."
       }
     },
     "wsTitle": "WebSocket",
-    "wsDescription": "Пробы подключаются к /ws с токеном в заголовке Authorization: Bearer <token>. После online-сообщения сервер раздаёт задания, проба возвращает результат.",
+    "wsDescription": "Пробы подключаются к /ws с токеном в заголовке Authorization: Bearer <token>. После online-сообщения сервер раздаёт задания (опционально с явным destination_url), проба возвращает результат.",
     "events": {
       "taskAssigned": "task.assigned → пробе выдано задание",
       "online": "online → проба сообщает алиас, регион и версию",
@@ -145,6 +157,7 @@
     "tabs": {
       "dashboard": "Дашборд",
       "probes": "Пробы",
+      "destinations": "Адреса",
       "tasks": "Задания"
     },
     "dashboard": {
@@ -198,6 +211,27 @@
         "actions": "Действия"
       }
     },
+    "destinations": {
+      "createTitle": "Создать адрес",
+      "listTitle": "Список адресов",
+      "name": "Название",
+      "url": "URL",
+      "submit": "Создать",
+      "nameRequired": "Укажите название",
+      "empty": "Адресов пока нет",
+      "edit": "Изменить",
+      "save": "Сохранить",
+      "cancel": "Отмена",
+      "delete": "Удалить",
+      "confirmDelete": "Удалить адрес «{{name}}»?",
+      "columns": {
+        "id": "ID",
+        "name": "Название",
+        "url": "URL",
+        "created": "Создан",
+        "actions": "Действия"
+      }
+    },
     "tasks": {
       "filtersTitle": "Фильтры",
       "filterStatus": "Статус",
@@ -224,7 +258,8 @@
         "assignedTo": "Назначено",
         "startedAt": "Запущено",
         "completedAt": "Завершено",
-        "probeTokens": "Пробы"
+        "probeTokens": "Пробы",
+        "destination": "Адрес проверки"
       }
     }
   },

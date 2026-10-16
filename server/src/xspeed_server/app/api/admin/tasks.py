@@ -58,6 +58,9 @@ class AdminTaskSummary(BaseModel):
     link: str
     status: str
     probe_tokens: list[str] | None
+    destination_id: int | None
+    destination_name: str | None
+    destination_url: str | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -82,6 +85,9 @@ class AdminTaskDetail(BaseModel):
     status: str
     probe_tokens: list[str] | None
     assigned_to: str | None
+    destination_id: int | None
+    destination_name: str | None
+    destination_url: str | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -164,6 +170,9 @@ async def list_admin_tasks(
                t.link,
                t.status,
                t.probe_tokens,
+               t.destination_id,
+               d.name AS destination_name,
+               d.url  AS destination_url,
                t.created_at,
                t.started_at,
                t.completed_at,
@@ -171,6 +180,7 @@ async def list_admin_tasks(
                (SELECT count(*)::int FROM task_results
                   WHERE task_id = t.id AND error IS NOT NULL) AS error_count
         FROM tasks t
+        LEFT JOIN destinations d ON d.id = t.destination_id
         {where_clause}
         ORDER BY t.created_at DESC, t.id DESC
         LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
@@ -199,9 +209,14 @@ async def get_admin_task(
     async with pool.acquire() as conn:
         task_row = await conn.fetchrow(
             """
-            SELECT id, link, status, probe_tokens, assigned_to,
-                   created_at, started_at, completed_at
-            FROM tasks WHERE id = $1
+            SELECT t.id, t.link, t.status, t.probe_tokens, t.assigned_to,
+                   t.destination_id,
+                   d.name AS destination_name,
+                   d.url  AS destination_url,
+                   t.created_at, t.started_at, t.completed_at
+            FROM tasks t
+            LEFT JOIN destinations d ON d.id = t.destination_id
+            WHERE t.id = $1
             """,
             task_id,
         )
@@ -228,6 +243,9 @@ async def get_admin_task(
             "status": task_row["status"],
             "probe_tokens": list(task_row["probe_tokens"]) if task_row["probe_tokens"] else None,
             "assigned_to": task_row["assigned_to"],
+            "destination_id": task_row["destination_id"],
+            "destination_name": task_row["destination_name"],
+            "destination_url": task_row["destination_url"],
             "created_at": task_row["created_at"],
             "started_at": task_row["started_at"],
             "completed_at": task_row["completed_at"],
@@ -242,6 +260,9 @@ def _row_to_summary(row: Any) -> dict[str, Any]:
         "link": str(row["link"]),
         "status": str(row["status"]),
         "probe_tokens": list(row["probe_tokens"]) if row["probe_tokens"] else None,
+        "destination_id": row["destination_id"],
+        "destination_name": row["destination_name"],
+        "destination_url": row["destination_url"],
         "created_at": row["created_at"],
         "started_at": row["started_at"],
         "completed_at": row["completed_at"],

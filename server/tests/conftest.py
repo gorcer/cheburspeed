@@ -79,6 +79,7 @@ async def clean_db(app_env: dict[str, Any]) -> AsyncIterator[None]:
                 tasks,
                 task_results_archive,
                 probes,
+                destinations,
                 regions,
                 admins
             RESTART IDENTITY CASCADE

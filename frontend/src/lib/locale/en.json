@@ -16,7 +16,11 @@
     "submit": "Run check",
     "submitting": "Submitting…",
     "errorInvalid": "Link must start with vless://",
-    "errorNetwork": "Could not enqueue the task. Try again later."
+    "errorNetwork": "Could not enqueue the task. Try again later.",
+    "destinationLabel": "Speedtest target",
+    "destinationPlaceholder": "— select —",
+    "destinationEmpty": "No targets available yet. Add one in the admin panel.",
+    "destinationRequired": "Select a speedtest target"
   },
   "map": {
     "title": "Region map",
@@ -86,6 +90,10 @@
         "title": "GET/POST/PUT/DELETE /api/v1/admin/probes",
         "description": "Probe CRUD. The probe token can be supplied explicitly or auto-generated."
       },
+      "destinations": {
+        "title": "GET/POST/PUT/DELETE /api/v1/admin/destinations",
+        "description": "CRUD over speedtest target URLs. The catalogue drives the homepage dropdown and is referenced by every task."
+      },
       "tasks": {
         "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
         "description": "List tasks with filters and detail with per-probe results."
@@ -98,11 +106,11 @@
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
-        "description": "Create a new task. Body: { link, probe_tokens? }."
+        "description": "Create a new task. Body: { link, destination_id, probe_tokens? }."
       },
       "getTask": {
         "title": "GET /api/v1/tasks/{id}",
-        "description": "Fetch a task with its results."
+        "description": "Fetch a task with its results and destination details."
       },
       "listTasks": {
         "title": "GET /api/v1/tasks?limit=&offset=",
@@ -115,10 +123,14 @@
       "onlineProbes": {
         "title": "GET /api/v1/probes/online",
         "description": "Per-region summary: online probes and median speed."
+      },
+      "listDestinations": {
+        "title": "GET /api/v1/destinations",
+        "description": "Public list of speedtest target URLs for the homepage dropdown."
       }
     },
     "wsTitle": "WebSocket",
-    "wsDescription": "Probes connect to /ws with a token in the Authorization: Bearer header. After the online message the server dispatches tasks; the probe returns a result.",
+    "wsDescription": "Probes connect to /ws with a token in the Authorization: Bearer header. After the online message the server dispatches tasks (optionally with an explicit destination_url override); the probe returns a result.",
     "events": {
       "taskAssigned": "task.assigned → probe is given a task",
       "online": "online → probe reports alias, region and version",
@@ -145,6 +157,7 @@
     "tabs": {
       "dashboard": "Dashboard",
       "probes": "Probes",
+      "destinations": "Destinations",
       "tasks": "Tasks"
     },
     "dashboard": {
@@ -198,6 +211,27 @@
         "actions": "Actions"
       }
     },
+    "destinations": {
+      "createTitle": "Create destination",
+      "listTitle": "Destinations",
+      "name": "Name",
+      "url": "URL",
+      "submit": "Create",
+      "nameRequired": "Name is required",
+      "empty": "No destinations yet",
+      "edit": "Edit",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "confirmDelete": "Delete destination «{{name}}»?",
+      "columns": {
+        "id": "ID",
+        "name": "Name",
+        "url": "URL",
+        "created": "Created",
+        "actions": "Actions"
+      }
+    },
     "tasks": {
       "filtersTitle": "Filters",
       "filterStatus": "Status",
@@ -224,7 +258,8 @@
         "assignedTo": "Assigned to",
         "startedAt": "Started",
         "completedAt": "Completed",
-        "probeTokens": "Probe tokens"
+        "probeTokens": "Probe tokens",
+        "destination": "Speedtest target"
       }
     }
   },

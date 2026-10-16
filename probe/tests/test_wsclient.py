@@ -128,10 +128,14 @@ async def _drive(
 
 async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> None:
     _connect, sockets = fake_connect
-    handler_calls: list[tuple[int, str]] = []
+    handler_calls: list[tuple[int, str, str | None]] = []
 
-    async def on_task(task_id: int, link: str) -> tuple[float | None, str | None]:
-        handler_calls.append((task_id, link))
+    async def on_task(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
+        handler_calls.append((task_id, link, destination_url))
         return 12.5, None
 
     settings = _settings()
@@ -151,6 +155,7 @@ async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> Non
                     "type": "task.assigned",
                     "task_id": 7,
                     "link": "vless://x@example.com:443",
+                    "destination_url": "https://speed.example.com/__down?bytes=100000000",
                     "protocol_version": 1,
                 }
             ),
@@ -166,7 +171,13 @@ async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> Non
         await client.close()
         await asyncio.wait_for(runner, timeout=1.0)
 
-    assert handler_calls == [(7, "vless://x@example.com:443")]
+    assert handler_calls == [
+        (
+            7,
+            "vless://x@example.com:443",
+            "https://speed.example.com/__down?bytes=100000000",
+        )
+    ]
     fake = sockets[-1]
     online = json.loads(fake.sent[0])
     assert online["type"] == "online"
@@ -180,10 +191,99 @@ async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> Non
     assert result["error"] is None
 
 
+async def test_client_uses_destination_url_when_present(fake_connect: Any) -> None:
+    """A populated destination_url must be passed through to the handler."""
+    _connect, sockets = fake_connect
+    handler_calls: list[str | None] = []
+
+    async def on_task(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
+        handler_calls.append(destination_url)
+        return 1.0, None
+
+    client = ProbeClient(_settings(), on_task=on_task)
+    runner = asyncio.create_task(client.run_forever())
+
+    try:
+        for _ in range(50):
+            if sockets and sockets[-1].sent:
+                break
+            await asyncio.sleep(0.01)
+        sockets[-1].push(
+            json.dumps(
+                {
+                    "type": "task.assigned",
+                    "task_id": 3,
+                    "link": "vless://x@example.com:443",
+                    "destination_url": "https://override.example.test/__down",
+                }
+            ),
+        )
+        for _ in range(50):
+            if len(sockets[-1].sent) >= 2:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        client.stop()
+        await client.close()
+        await asyncio.wait_for(runner, timeout=1.0)
+
+    assert handler_calls == ["https://override.example.test/__down"]
+
+
+async def test_client_falls_back_when_destination_url_absent(fake_connect: Any) -> None:
+    """Tasks without destination_url must reach the handler with ``None``."""
+    _connect, sockets = fake_connect
+    handler_calls: list[str | None] = []
+
+    async def on_task(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
+        handler_calls.append(destination_url)
+        return 1.0, None
+
+    client = ProbeClient(_settings(), on_task=on_task)
+    runner = asyncio.create_task(client.run_forever())
+
+    try:
+        for _ in range(50):
+            if sockets and sockets[-1].sent:
+                break
+            await asyncio.sleep(0.01)
+        sockets[-1].push(
+            json.dumps(
+                {
+                    "type": "task.assigned",
+                    "task_id": 4,
+                    "link": "vless://x@example.com:443",
+                }
+            ),
+        )
+        for _ in range(50):
+            if len(sockets[-1].sent) >= 2:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        client.stop()
+        await client.close()
+        await asyncio.wait_for(runner, timeout=1.0)
+
+    assert handler_calls == [None]
+
+
 async def test_client_reports_netif_unavailable_error(fake_connect: Any) -> None:
     _connect, sockets = fake_connect
 
-    async def on_task(task_id: int, link: str) -> tuple[float | None, str | None]:
+    async def on_task(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
         return None, "netif_unavailable"
 
     settings = _settings(network_interface="lo")
@@ -221,7 +321,11 @@ async def test_client_reports_netif_unavailable_error(fake_connect: Any) -> None
 async def test_client_ignores_unknown_message_types(fake_connect: Any) -> None:
     _connect, sockets = fake_connect
 
-    async def on_task(task_id: int, link: str) -> tuple[float | None, str | None]:
+    async def on_task(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
         raise AssertionError("handler should not be called")
 
     settings = _settings()
@@ -252,7 +356,11 @@ async def test_client_ignores_unknown_message_types(fake_connect: Any) -> None:
 async def test_client_handler_exception_reports_handler_error(fake_connect: Any) -> None:
     _connect, sockets = fake_connect
 
-    async def on_task(task_id: int, link: str) -> tuple[float | None, str | None]:
+    async def on_task(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
         raise RuntimeError("boom")
 
     settings = _settings()

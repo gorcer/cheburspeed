@@ -122,10 +122,28 @@ def test_ws_closes_with_4001_when_token_unknown(ws_client: Any) -> None:
     assert exc_info.value.code == 4001
 
 
-def test_public_ws_receives_task_created_event(ws_client: Any) -> None:
+async def test_public_ws_receives_task_created_event(ws_client: Any) -> None:
     """The browser-facing socket is anonymous and emits live task updates."""
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        destination_row = await conn.fetchrow(
+            """
+            INSERT INTO destinations (name, url)
+            VALUES ($1, $2)
+            RETURNING id
+            """,
+            "Cloudflare",
+            "https://speed.example.com/__down?bytes=100000000",
+        )
+        destination_id = int(destination_row["id"])
+    finally:
+        await conn.close()
+
     with ws_client.websocket_connect("/ws/public") as websocket:
-        response = ws_client.post("/api/v1/tasks", json={"link": VALID_LINK})
+        response = ws_client.post(
+            "/api/v1/tasks",
+            json={"link": VALID_LINK, "destination_id": destination_id},
+        )
         event = websocket.receive_json()
 
     assert response.status_code == 201

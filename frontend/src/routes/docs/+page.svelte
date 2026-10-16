@@ -7,11 +7,13 @@
     { key: "listTasks" },
     { key: "listRegions" },
     { key: "onlineProbes" },
+    { key: "listDestinations" },
   ] as const;
 
   const adminEndpoints = [
     { key: "login" },
     { key: "probes" },
+    { key: "destinations" },
     { key: "tasks" },
     { key: "stats" },
   ] as const;

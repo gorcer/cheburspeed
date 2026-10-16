@@ -30,12 +30,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-TaskHandler = Callable[[int, str], Awaitable[tuple[float | None, str | None]]]
+TaskHandler = Callable[
+    [int, str, str | None],
+    Awaitable[tuple[float | None, str | None]],
+]
 """Callable invoked on every ``task.assigned`` envelope.
 
-It receives ``(task_id, link)`` and returns ``(speed_mbps, error)``.
-Returning ``(None, None)`` is treated as success and the client will not
-send anything — useful for handlers that post results out-of-band.
+It receives ``(task_id, link, destination_url)`` and returns
+``(speed_mbps, error)``. ``destination_url`` is ``None`` when the
+task did not specify one — the handler should fall back to the
+configured default in that case. Returning ``(None, None)`` is
+treated as success and the client will not send anything — useful
+for handlers that post results out-of-band.
 """
 
 
@@ -177,11 +183,16 @@ class ProbeClient:
         except (KeyError, TypeError, ValueError):
             logger.warning("task.assigned missing task_id/link: %r", payload)
             return
+        raw_destination = payload.get("destination_url")
+        if isinstance(raw_destination, str) and raw_destination:
+            destination_url: str | None = raw_destination
+        else:
+            destination_url = None
         logger.info("received task %s", task_id)
         speed_mbps: float | None = None
         error: str | None = None
         try:
-            speed_mbps, error = await self._on_task(task_id, link)
+            speed_mbps, error = await self._on_task(task_id, link, destination_url)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001

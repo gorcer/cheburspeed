@@ -38,8 +38,14 @@ async def _run_task(
     *,
     settings: ProbeSettings,
     xray: XrayManager,
+    speedtest_url: str | None = None,
 ) -> tuple[float | None, str | None]:
-    """Drive a single task to completion and return ``(speed_mbps, error)``."""
+    """Drive a single task to completion and return ``(speed_mbps, error)``.
+
+    ``speedtest_url`` overrides :attr:`ProbeSettings.speedtest_url` when
+    provided; otherwise the probe falls back to its configured default.
+    """
+    target_url = speedtest_url or settings.speedtest_url
     if not ensure_interface_available(settings.network_interface):
         return None, "netif_unavailable"
     try:
@@ -53,7 +59,7 @@ async def _run_task(
             return None, "xray_not_ready"
         try:
             result = await measure(
-                settings.speedtest_url,
+                target_url,
                 proxy_url=xray.socks_url,
                 timeout_seconds=settings.speedtest_timeout,
             )
@@ -78,8 +84,18 @@ def _build_handler(
 ) -> Any:
     """Return an async callback suitable for :class:`ProbeClient`."""
 
-    async def handler(task_id: int, link: str) -> tuple[float | None, str | None]:
-        return await _run_task(task_id, link, settings=settings, xray=xray)
+    async def handler(
+        task_id: int,
+        link: str,
+        destination_url: str | None,
+    ) -> tuple[float | None, str | None]:
+        return await _run_task(
+            task_id,
+            link,
+            settings=settings,
+            xray=xray,
+            speedtest_url=destination_url,
+        )
 
     return handler
 

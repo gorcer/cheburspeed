@@ -1,8 +1,8 @@
-import { browser } from '$app/environment';
+import { browser } from "$app/environment";
 
-const apiBase = (import.meta.env.PUBLIC_API_BASE ?? '/api') as string;
+const apiBase = (import.meta.env.PUBLIC_API_BASE ?? "/api") as string;
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
 export interface TaskResult {
   id: number;
@@ -22,6 +22,9 @@ export interface Task {
   address: string | null;
   status: TaskStatus;
   probe_tokens: string[] | null;
+  destination_id: number | null;
+  destination_name: string | null;
+  destination_url: string | null;
   created_at: string;
   completed_at: string | null;
   results: TaskResult[];
@@ -30,9 +33,18 @@ export interface Task {
 export interface TaskSummary {
   id: number;
   link: string;
+  address: string | null;
   status: TaskStatus;
+  destination_id: number | null;
+  destination_name: string | null;
+  destination_url: string | null;
   created_at: string;
   completed_at: string | null;
+}
+
+export interface CreateTaskOptions {
+  destinationId: number;
+  probeTokens?: string[];
 }
 
 export interface TaskList {
@@ -50,7 +62,7 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
     this.body = body;
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
@@ -58,8 +70,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     ...init,
     headers: {
-      Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -72,7 +84,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       body = await response.text().catch(() => null);
     }
     const detail =
-      body && typeof body === 'object' && 'detail' in body
+      body && typeof body === "object" && "detail" in body
         ? String((body as { detail: unknown }).detail)
         : `${response.status} ${response.statusText}`;
     throw new ApiError(response.status, body, detail);
@@ -85,10 +97,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function createTask(link: string, probeTokens?: string[]): Promise<TaskSummary> {
-  return request<TaskSummary>('/v1/tasks', {
-    method: 'POST',
-    body: JSON.stringify({ link, probe_tokens: probeTokens }),
+export function createTask(
+  link: string,
+  opts: CreateTaskOptions,
+): Promise<TaskSummary> {
+  return request<TaskSummary>("/v1/tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      link,
+      destination_id: opts.destinationId,
+      probe_tokens: opts.probeTokens,
+    }),
   });
 }
 
@@ -103,10 +122,10 @@ export interface ListTasksParams {
 
 export function listTasks(params: ListTasksParams = {}): Promise<TaskList> {
   const search = new URLSearchParams();
-  if (params.limit !== undefined) search.set('limit', String(params.limit));
-  if (params.offset !== undefined) search.set('offset', String(params.offset));
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
   const query = search.toString();
-  return request<TaskList>(`/v1/tasks${query ? `?${query}` : ''}`);
+  return request<TaskList>(`/v1/tasks${query ? `?${query}` : ""}`);
 }
 
 export const isClient = browser;

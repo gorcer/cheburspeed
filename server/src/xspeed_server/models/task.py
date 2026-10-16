@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Index, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,10 @@ class Task(Base):
         server_default="pending",
     )
     probe_tokens: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    destination_id: Mapped[int | None] = mapped_column(
+        ForeignKey("destinations.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

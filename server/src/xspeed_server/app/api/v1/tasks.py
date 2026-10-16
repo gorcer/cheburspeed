@@ -40,6 +40,14 @@ class TaskCreate(BaseModel):
         pattern=VLESS_LINK_PATTERN,
         description="vless:// URI; full schema is validated by FastAPI's regex.",
     )
+    destination_id: int = Field(
+        ...,
+        ge=1,
+        description=(
+            "Speedtest target chosen from the destinations catalogue. "
+            "Probes use this URL instead of their default ``SPEEDTEST_URL``."
+        ),
+    )
     probe_tokens: list[str] | None = Field(
         default=None,
         description=(
@@ -64,6 +72,8 @@ class TaskCreatedResponse(BaseModel):
 
     id: int
     status: str
+    destination_id: int
+    destination_url: str
 
 
 class TaskResultItem(BaseModel):
@@ -88,6 +98,9 @@ class TaskDetail(BaseModel):
     address: str | None
     status: str
     probe_tokens: list[str] | None
+    destination_id: int | None
+    destination_name: str | None
+    destination_url: str | None
     created_at: datetime
     completed_at: datetime | None
     results: list[TaskResultItem]
@@ -98,7 +111,11 @@ class TaskSummary(BaseModel):
 
     id: int
     link: str
+    address: str | None
     status: str
+    destination_id: int | None
+    destination_name: str | None
+    destination_url: str | None
     created_at: datetime
     completed_at: datetime | None
 
@@ -112,7 +129,12 @@ class TaskList(BaseModel):
     total: int
 
 
-async def _insert_task(conn: Connection, link: str, probe_tokens: list[str] | None) -> int:
+async def _insert_task(
+    conn: Connection,
+    link: str,
+    destination_id: int,
+    probe_tokens: list[str] | None,
+) -> int:
     """Insert a new task row and return its primary key.
 
     Uses raw SQL via asyncpg so the response path is independent from the
@@ -120,25 +142,42 @@ async def _insert_task(conn: Connection, link: str, probe_tokens: list[str] | No
     before being passed to asyncpg because the default driver codec
     expects a string for ``jsonb`` parameters.
     """
-    row = await conn.fetchrow(
-        """
-        INSERT INTO tasks (link, status, probe_tokens, created_at)
-        VALUES ($1, 'pending', $2::jsonb, now())
-        RETURNING id
-        """,
-        link,
-        None if probe_tokens is None else json.dumps(probe_tokens),
-    )
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tasks (link, destination_id, status, probe_tokens, created_at)
+            VALUES ($1, $2, 'pending', $3::jsonb, now())
+            RETURNING id
+            """,
+            link,
+            destination_id,
+            None if probe_tokens is None else json.dumps(probe_tokens),
+        )
+    except Exception as exc:  # noqa: BLE001 - translate FK violation to 404
+        if _is_foreign_key_violation(exc):
+            raise HTTPException(status_code=404, detail="Destination not found") from exc
+        raise
     if row is None:  # pragma: no cover - RETURNING is guaranteed by Postgres
         raise HTTPException(status_code=500, detail="Failed to create task")
     return int(row["id"])
+
+
+async def _resolve_destination(conn: Connection, destination_id: int) -> tuple[str, str] | None:
+    """Return ``(name, url)`` for ``destination_id`` or ``None`` when missing."""
+    row = await conn.fetchrow(
+        "SELECT name, url FROM destinations WHERE id = $1",
+        destination_id,
+    )
+    if row is None:
+        return None
+    return str(row["name"]), str(row["url"])
 
 
 async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, Any] | None:
     """Fetch the task header plus its results in a single connection checkout."""
     task_row = await conn.fetchrow(
         """
-        SELECT id, link, status, probe_tokens, created_at, completed_at
+        SELECT id, link, status, probe_tokens, destination_id, created_at, completed_at
         FROM tasks
         WHERE id = $1
         """,
@@ -146,6 +185,10 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
     )
     if task_row is None:
         return None
+    destination_id = task_row["destination_id"]
+    destination: tuple[str, str] | None = None
+    if destination_id is not None:
+        destination = await _resolve_destination(conn, int(destination_id))
     result_rows = await conn.fetch(
         """
         SELECT tr.id,
@@ -171,6 +214,9 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
         "address": _extract_address(str(task_row["link"])),
         "status": task_row["status"],
         "probe_tokens": list(task_row["probe_tokens"]) if task_row["probe_tokens"] else None,
+        "destination_id": destination_id,
+        "destination_name": destination[0] if destination else None,
+        "destination_url": destination[1] if destination else None,
         "created_at": task_row["created_at"],
         "completed_at": task_row["completed_at"],
         "results": [dict(row) for row in result_rows],
@@ -201,6 +247,12 @@ def _extract_address(link: str) -> str | None:
     return host
 
 
+def _is_foreign_key_violation(exc: BaseException) -> bool:
+    """Return True when ``exc`` is an asyncpg foreign-key violation."""
+    sqlstate = getattr(exc, "sqlstate", None)
+    return sqlstate == "23503"
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -215,10 +267,24 @@ async def create_task(
 ) -> TaskCreatedResponse:
     """Validate the vless link, insert a ``pending`` row and return its id."""
     async with pool.acquire() as conn:
-        task_id = await _insert_task(conn, payload.link, payload.probe_tokens)
+        destination = await _resolve_destination(conn, payload.destination_id)
+        if destination is None:
+            raise HTTPException(status_code=404, detail="Destination not found")
+        task_id = await _insert_task(
+            conn,
+            payload.link,
+            payload.destination_id,
+            payload.probe_tokens,
+        )
+        destination_name, destination_url = destination
     hub = request.app.state.hub
     await hub.broadcast({"type": "task.created", "payload": {"id": task_id, "status": "pending"}})
-    return TaskCreatedResponse(id=task_id, status="pending")
+    return TaskCreatedResponse(
+        id=task_id,
+        status="pending",
+        destination_id=payload.destination_id,
+        destination_url=destination_url,
+    )
 
 
 @router.get(
@@ -257,16 +323,34 @@ async def list_tasks(
         total = await conn.fetchval("SELECT count(*) FROM tasks")
         rows = await conn.fetch(
             """
-            SELECT id, link, status, created_at, completed_at
-            FROM tasks
-            ORDER BY created_at DESC, id DESC
+            SELECT t.id, t.link, t.status, t.destination_id,
+                   d.name AS destination_name,
+                   d.url  AS destination_url,
+                   t.created_at, t.completed_at
+            FROM tasks t
+            LEFT JOIN destinations d ON d.id = t.destination_id
+            ORDER BY t.created_at DESC, t.id DESC
             LIMIT $1 OFFSET $2
             """,
             limit,
             offset,
         )
-    items = [TaskSummary.model_validate(dict(row)) for row in rows]
+    items = [TaskSummary.model_validate(_row_to_summary(row)) for row in rows]
     return TaskList(items=items, limit=limit, offset=offset, total=int(total or 0))
+
+
+def _row_to_summary(row: Any) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "link": str(row["link"]),
+        "address": _extract_address(str(row["link"])),
+        "status": str(row["status"]),
+        "destination_id": row["destination_id"],
+        "destination_name": row["destination_name"],
+        "destination_url": row["destination_url"],
+        "created_at": row["created_at"],
+        "completed_at": row["completed_at"],
+    }
 
 
 __all__ = [

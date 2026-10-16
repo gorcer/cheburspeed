@@ -266,9 +266,7 @@ async def test_check_completion_resets_multi_probe_task_to_pending(
             raw={"speed_mbps": 8.0, "error": None},
         )
         completed = await check_completion(conn, task_id)
-        row = await conn.fetchrow(
-            "SELECT status, assigned_to FROM tasks WHERE id = $1", task_id
-        )
+        row = await conn.fetchrow("SELECT status, assigned_to FROM tasks WHERE id = $1", task_id)
 
     assert completed is False
     assert row["status"] == "pending"
@@ -288,9 +286,7 @@ async def test_check_completion_resets_multi_probe_task_to_pending(
             raw={"speed_mbps": 12.0, "error": None},
         )
         completed = await check_completion(conn, task_id)
-        row = await conn.fetchrow(
-            "SELECT status, completed_at FROM tasks WHERE id = $1", task_id
-        )
+        row = await conn.fetchrow("SELECT status, completed_at FROM tasks WHERE id = $1", task_id)
 
     assert completed is True
     assert row["status"] == "completed"
@@ -373,9 +369,7 @@ async def test_sweep_leaves_recent_running_tasks_alone(app_db: Database) -> None
 
     conn = await asyncpg.connect(_test_dsn())
     try:
-        row = await conn.fetchrow(
-            "SELECT status, assigned_to FROM tasks WHERE id = $1", task_id
-        )
+        row = await conn.fetchrow("SELECT status, assigned_to FROM tasks WHERE id = $1", task_id)
     finally:
         await conn.close()
     assert row["status"] == "running"
@@ -431,9 +425,100 @@ def test_protocol_version_constant_matches_spec() -> None:
 
 def test_claimed_task_is_a_dataclass_with_id_and_link() -> None:
     """Sanity check on the public :class:`ClaimedTask` shape."""
-    sample = ClaimedTask(id=1, link=VALID_LINK)
+    sample = ClaimedTask(id=1, link=VALID_LINK, destination_url=None)
     assert sample.id == 1
     assert sample.link == VALID_LINK
+    assert sample.destination_url is None
+
+
+async def test_claim_task_returns_destination_url_from_join(app_db: Database) -> None:
+    """``claim_task`` joins the destination catalogue and surfaces the URL."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-dest", region_id)
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        destination_row = await conn.fetchrow(
+            """
+            INSERT INTO destinations (name, url)
+            VALUES ($1, $2)
+            RETURNING id
+            """,
+            "Cloudflare",
+            "https://speed.example.com/__down?bytes=100000000",
+        )
+        destination_id = int(destination_row["id"])
+        await conn.execute(
+            "INSERT INTO tasks (link, destination_id) VALUES ($1, $2)",
+            VALID_LINK,
+            destination_id,
+        )
+    finally:
+        await conn.close()
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-dest")
+
+    assert claimed is not None
+    assert claimed.destination_url == "https://speed.example.com/__down?bytes=100000000"
+
+
+async def test_claim_task_returns_none_destination_when_task_has_no_destination(
+    app_db: Database,
+) -> None:
+    """Tasks without a destination yield ``destination_url=None`` for the probe."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-no-dest", region_id)
+    await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-no-dest")
+
+    assert claimed is not None
+    assert claimed.destination_url is None
+
+
+async def test_dispatch_to_probe_attaches_destination_url(app_db: Database) -> None:
+    """The dispatched ``task.assigned`` envelope carries the destination URL."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-attach", region_id)
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        destination_row = await conn.fetchrow(
+            """
+            INSERT INTO destinations (name, url)
+            VALUES ($1, $2)
+            RETURNING id
+            """,
+            "Cloudflare",
+            "https://speed.example.com/__down?bytes=100000000",
+        )
+        destination_id = int(destination_row["id"])
+        await conn.execute(
+            "INSERT INTO tasks (link, destination_id) VALUES ($1, $2)",
+            VALID_LINK,
+            destination_id,
+        )
+    finally:
+        await conn.close()
+
+    hub = Hub()
+    captured: list[dict[str, Any]] = []
+
+    async def fake_send(token: str, message: dict[str, Any]) -> bool:
+        _ = token
+        captured.append(message)
+        return True
+
+    hub.send = fake_send  # type: ignore[method-assign]
+
+    async with app_db.pool.acquire():
+        dispatched = await dispatch_to_probe(app_db, hub, "probe-attach")
+
+    assert dispatched is True
+    assert len(captured) == 1
+    message = captured[0]
+    assert message["type"] == "task.assigned"
+    assert message["destination_url"] == "https://speed.example.com/__down?bytes=100000000"
 
 
 __all__ = [
@@ -441,7 +526,10 @@ __all__ = [
     "test_claim_task_picks_oldest_pending_task",
     "test_claim_task_filters_by_probe_tokens_whitelist",
     "test_claim_task_marks_running_with_assigned_to",
+    "test_claim_task_returns_destination_url_from_join",
+    "test_claim_task_returns_none_destination_when_task_has_no_destination",
     "test_dispatch_distributes_tasks_to_probes_without_duplicates",
+    "test_dispatch_to_probe_attaches_destination_url",
     "test_check_completion_marks_single_probe_task_completed",
     "test_check_completion_resets_multi_probe_task_to_pending",
     "test_sweep_resets_stale_running_tasks",

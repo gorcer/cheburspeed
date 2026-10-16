@@ -49,6 +49,9 @@ export interface AdminTaskSummary {
   link: string;
   status: TaskStatus;
   probe_tokens: string[] | null;
+  destination_id: number | null;
+  destination_name: string | null;
+  destination_url: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -82,6 +85,9 @@ export interface AdminTaskDetail {
   status: TaskStatus;
   probe_tokens: string[] | null;
   assigned_to: string | null;
+  destination_id: number | null;
+  destination_name: string | null;
+  destination_url: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
