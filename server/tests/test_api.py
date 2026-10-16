@@ -128,10 +128,34 @@ async def test_get_task_returns_task_with_results(
     assert body["id"] == task_id
     assert body["status"] == "pending"
     assert body["link"] == VALID_LINK
+    assert body["destination"] == "example.com:443"
     assert body["probe_tokens"] is None
     assert body["results"] == []
     assert body["completed_at"] is None
     assert body["created_at"] is not None
+
+
+async def test_get_task_destination_handles_ip_and_bare_host(
+    client: AsyncClient,
+) -> None:
+    """A vless:// URI with an IP host returns host:port; a malformed one yields None."""
+    ip_link = (
+        "vless://11111111-2222-3333-4444-555555555555@"
+        "192.0.2.10:443?security=none&type=tcp#ip"
+    )
+    created = await client.post("/api/v1/tasks", json={"link": ip_link})
+    assert created.status_code == 201
+    response = await client.get(f"/api/v1/tasks/{created.json()['id']}")
+    assert response.json()["destination"] == "192.0.2.10:443"
+
+    bare_host_link = (
+        "vless://11111111-2222-3333-4444-555555555555@"
+        "example.com:443?security=reality&sni=cdn.example.com&type=tcp#bare"
+    )
+    created = await client.post("/api/v1/tasks", json={"link": bare_host_link})
+    assert created.status_code == 201
+    response = await client.get(f"/api/v1/tasks/{created.json()['id']}")
+    assert response.json()["destination"] == "example.com:443"
 
 
 async def test_list_tasks_returns_paginated_envelope(client: AsyncClient) -> None:

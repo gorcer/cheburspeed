@@ -67,6 +67,8 @@
     return 'text-success';
   }
 
+  const destination = $derived($currentTaskQuery.data?.destination ?? null);
+
   onMount(() => {
     const off = ws.on((event) => {
       if (event.type === 'result.added' || event.type === 'task.updated') {
@@ -96,6 +98,15 @@
       </span>
     {/if}
   </div>
+
+  {#if $currentTaskQuery.data}
+    <p class="text-sm text-surface-content/70">
+      <span class="text-surface-content/50">{t('results.details.destination')}:</span>
+      <span class="ml-1 font-mono text-surface-content">
+        {destination ?? '—'}
+      </span>
+    </p>
+  {/if}
 
   {#if $currentTaskId === null}
     <p class="text-sm text-surface-content/60">{t('results.empty')}</p>

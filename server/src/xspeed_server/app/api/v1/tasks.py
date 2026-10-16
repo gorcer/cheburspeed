@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from asyncpg import Connection
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
@@ -84,6 +85,7 @@ class TaskDetail(BaseModel):
 
     id: int
     link: str
+    destination: str | None
     status: str
     probe_tokens: list[str] | None
     created_at: datetime
@@ -166,12 +168,37 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
     return {
         "id": task_row["id"],
         "link": task_row["link"],
+        "destination": _extract_destination(str(task_row["link"])),
         "status": task_row["status"],
         "probe_tokens": list(task_row["probe_tokens"]) if task_row["probe_tokens"] else None,
         "created_at": task_row["created_at"],
         "completed_at": task_row["completed_at"],
         "results": [dict(row) for row in result_rows],
     }
+
+
+def _extract_destination(link: str) -> str | None:
+    """Return ``host[:port]`` parsed from a vless:// URI, or None on failure.
+
+    The vless URI shape is ``vless://<UUID>@<host>:<port>?<query>#<name>``;
+    :func:`urllib.parse.urlparse` already handles the userinfo split so
+    :attr:`ParseResult.hostname` and :attr:`ParseResult.port` are exactly
+    what we need to surface in the UI. We bracket an IPv6 host (no port
+    is exposed by ``urlparse`` in that case but the operator can still
+    see the address).
+    """
+    try:
+        parsed = urlparse(link)
+    except ValueError:
+        return None
+    if parsed.scheme != "vless":
+        return None
+    host = parsed.hostname
+    if not host:
+        return None
+    if parsed.port is not None:
+        return f"{host}:{parsed.port}"
+    return host
 
 
 @router.post(

@@ -46,6 +46,7 @@
       "empty": "No results received yet.",
       "region": "Region",
       "probe": "Probe",
+      "destination": "Destination",
       "speed": "Speed",
       "error": "Error",
       "created": "Test date",
