@@ -84,6 +84,7 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgresql+asyncpg://xspeed:xspeed@localhost:5432/xspeed
+      TEST_DATABASE_URL: postgresql+asyncpg://xspeed:xspeed@localhost:5432/xspeed
       JWT_SECRET: ci-secret-do-not-use-anywhere-else-32chars
       WS_HOST: ws://localhost:8000/ws
       FRONTEND_ORIGIN: http://localhost:3000
