@@ -67,7 +67,7 @@
     return 'text-success';
   }
 
-  const destination = $derived($currentTaskQuery.data?.destination ?? null);
+  const address = $derived($currentTaskQuery.data?.address ?? null);
 
   onMount(() => {
     const off = ws.on((event) => {
@@ -101,9 +101,9 @@
 
   {#if $currentTaskQuery.data}
     <p class="text-sm text-surface-content/70">
-      <span class="text-surface-content/50">{t('results.details.destination')}:</span>
+      <span class="text-surface-content/50">{t('results.details.address')}:</span>
       <span class="ml-1 font-mono text-surface-content">
-        {destination ?? '—'}
+        {address ?? '—'}
       </span>
     </p>
   {/if}

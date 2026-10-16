@@ -19,7 +19,7 @@ export interface TaskResult {
 export interface Task {
   id: number;
   link: string;
-  destination: string | null;
+  address: string | null;
   status: TaskStatus;
   probe_tokens: string[] | null;
   created_at: string;

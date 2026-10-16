@@ -85,7 +85,7 @@ class TaskDetail(BaseModel):
 
     id: int
     link: str
-    destination: str | None
+    address: str | None
     status: str
     probe_tokens: list[str] | None
     created_at: datetime
@@ -168,7 +168,7 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
     return {
         "id": task_row["id"],
         "link": task_row["link"],
-        "destination": _extract_destination(str(task_row["link"])),
+        "address": _extract_address(str(task_row["link"])),
         "status": task_row["status"],
         "probe_tokens": list(task_row["probe_tokens"]) if task_row["probe_tokens"] else None,
         "created_at": task_row["created_at"],
@@ -177,7 +177,7 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
     }
 
 
-def _extract_destination(link: str) -> str | None:
+def _extract_address(link: str) -> str | None:
     """Return ``host[:port]`` parsed from a vless:// URI, or None on failure.
 
     The vless URI shape is ``vless://<UUID>@<host>:<port>?<query>#<name>``;
