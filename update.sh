@@ -19,7 +19,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 
-COMPOSE=(docker compose -p xspeed-dev)
+COMPOSE=(docker compose)
 PROBE_IMAGE="xspeed-probe:dev"
 PROBE_SKIP="${PROBE_SKIP:-0}"
 
@@ -62,6 +62,40 @@ echo "   HEAD now at $NEW_HEAD: $(git log -1 --pretty=%s)"
 
 # ---- 2. rebuild + restart stack ------------------------------------------
 say "2. docker compose up -d --build"
+
+# Resolve the compose project name this stack will use so we can spot
+# stale containers left over from a previous deployment under a different
+# `-p` flag or created without compose labels at all.
+COMPOSE_PROJECT="$("${COMPOSE[@]}" config --format json 2>/dev/null | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('name', '') or '')
+" 2>/dev/null || true)"
+[[ -z "$COMPOSE_PROJECT" ]] && COMPOSE_PROJECT="xspeed"
+echo "   compose project: $COMPOSE_PROJECT"
+
+# Pre-clean: drop any pre-existing container the stack would otherwise
+# fail to create because its `container_name` collides with a stale
+# container from another (or no) compose project.
+while IFS= read -r CNAME; do
+    [[ -z "$CNAME" ]] && continue
+    if ! docker ps -a --format '{{.Names}}' | grep -Fxq "$CNAME"; then
+        continue
+    fi
+    OWNING="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$CNAME" 2>/dev/null || true)"
+    if [[ "$OWNING" == "$COMPOSE_PROJECT" ]]; then
+        continue
+    fi
+    warn "removing stale container $CNAME (compose project: '${OWNING:-<none>}', expected '$COMPOSE_PROJECT')"
+    docker rm -f "$CNAME" >/dev/null 2>&1 || warn "failed to remove $CNAME — 'docker compose up' may fail"
+done < <("${COMPOSE[@]}" config --format json 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for svc in (d.get('services') or {}).values():
+    n = svc.get('container_name')
+    if n:
+        print(n)
+" 2>/dev/null)
+
 "${COMPOSE[@]}" up -d --build
 
 # wait for healthchecks to settle
