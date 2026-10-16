@@ -53,6 +53,17 @@
       "speedValue": "{{value}} Mbps"
     }
   },
+  "history": {
+    "title": "Check history",
+    "empty": "No checks yet",
+    "columns": {
+      "probeId": "Probe ID",
+      "probeName": "Probe name",
+      "speed": "Speed",
+      "dest": "Destination address",
+      "date": "Date"
+    }
+  },
   "status": {
     "live": "Live",
     "connecting": "Connecting…",

@@ -53,6 +53,17 @@
       "speedValue": "{{value}} Мбит/с"
     }
   },
+  "history": {
+    "title": "История проверок",
+    "empty": "Проверок пока нет",
+    "columns": {
+      "probeId": "ID пробы",
+      "probeName": "Имя пробы",
+      "speed": "Скорость",
+      "dest": "Адрес назначения",
+      "date": "Дата"
+    }
+  },
   "status": {
     "live": "Live",
     "connecting": "Подключение…",

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HistoryTable from '$lib/components/HistoryTable.svelte';
   import Map from '$lib/components/Map.svelte';
   import ProbeForm from '$lib/components/ProbeForm.svelte';
   import ResultsTable from '$lib/components/ResultsTable.svelte';
@@ -12,4 +13,5 @@
   <ProbeForm />
   <Map />
   <ResultsTable />
+  <HistoryTable />
 </div>
