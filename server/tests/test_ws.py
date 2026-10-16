@@ -250,9 +250,7 @@ async def test_ws_marks_task_completed_after_probe_reports_result(
 
     conn = await asyncpg.connect(_test_dsn())
     try:
-        row = await conn.fetchrow(
-            "SELECT status, completed_at FROM tasks WHERE id = $1", task_id
-        )
+        row = await conn.fetchrow("SELECT status, completed_at FROM tasks WHERE id = $1", task_id)
     finally:
         await conn.close()
 
@@ -287,9 +285,7 @@ async def test_ws_records_probe_metadata_from_online_message(ws_client: Any) -> 
 
     conn = await asyncpg.connect(_test_dsn())
     try:
-        row = await conn.fetchrow(
-            "SELECT alias, last_seen_at FROM probes WHERE id = $1", probe_id
-        )
+        row = await conn.fetchrow("SELECT alias, last_seen_at FROM probes WHERE id = $1", probe_id)
     finally:
         await conn.close()
     assert row["alias"] == "real-alias"

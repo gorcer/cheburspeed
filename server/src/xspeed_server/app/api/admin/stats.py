@@ -150,10 +150,7 @@ async def get_admin_stats(pool: PoolDep) -> AdminStats:
         median_rows = await conn.fetch(_MEDIAN_QUERY)
         histogram_rows: list[HistogramBucket] = []
         for label, lo, hi in _HISTOGRAM_BUCKETS:
-            count = int(
-                await conn.fetchval(_HISTOGRAM_QUERY_TEMPLATE, lo, hi)
-                or 0
-            )
+            count = int(await conn.fetchval(_HISTOGRAM_QUERY_TEMPLATE, lo, hi) or 0)
             histogram_rows.append(
                 HistogramBucket(bucket=label, min_mbps=lo, max_mbps=hi, count=count)
             )

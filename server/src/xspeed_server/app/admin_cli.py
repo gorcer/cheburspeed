@@ -85,9 +85,7 @@ async def _amain(args: argparse.Namespace) -> int:
     settings = get_settings()
     db = await Database.create(settings)
     try:
-        status, admin_id = await create_admin(
-            db, email=args.email, password=args.password
-        )
+        status, admin_id = await create_admin(db, email=args.email, password=args.password)
     finally:
         await db.dispose()
     print(f"admin {args.email}: {status} (id={admin_id})")

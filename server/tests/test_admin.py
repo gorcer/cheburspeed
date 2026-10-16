@@ -310,9 +310,7 @@ async def test_admin_tasks_listing_with_filters(
     assert {item["status"] for item in body["items"]} == {"pending", "completed", "failed"}
 
     # Status filter
-    response = await client.get(
-        "/api/v1/admin/tasks?status=completed", headers=headers
-    )
+    response = await client.get("/api/v1/admin/tasks?status=completed", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["total"] == 1
@@ -321,9 +319,7 @@ async def test_admin_tasks_listing_with_filters(
     assert body["items"][0]["error_count"] == 0
 
     # Region filter
-    response = await client.get(
-        f"/api/v1/admin/tasks?region={regions[0]['code']}", headers=headers
-    )
+    response = await client.get(f"/api/v1/admin/tasks?region={regions[0]['code']}", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["total"] == 1
@@ -341,15 +337,11 @@ async def test_admin_tasks_listing_with_filters(
     assert response.json()["total"] == 3
 
     # Status filter with bad value
-    response = await client.get(
-        "/api/v1/admin/tasks?status=invalid", headers=headers
-    )
+    response = await client.get("/api/v1/admin/tasks?status=invalid", headers=headers)
     assert response.status_code == 422, response.text
 
     # Detail endpoint
-    response = await client.get(
-        f"/api/v1/admin/tasks/{task_ids[1]}", headers=headers
-    )
+    response = await client.get(f"/api/v1/admin/tasks/{task_ids[1]}", headers=headers)
     assert response.status_code == 200, response.text
     detail = response.json()
     assert detail["id"] == task_ids[1]
@@ -405,9 +397,7 @@ async def test_admin_stats_returns_aggregate_payload(
                 )
             )["id"]
         )
-        for probe_id, speed in zip(
-            probe_ids, (0.5, 1.5, 6.0, 22.0, 70.0, 150.0), strict=True
-        ):
+        for probe_id, speed in zip(probe_ids, (0.5, 1.5, 6.0, 22.0, 70.0, 150.0), strict=True):
             await conn.execute(
                 """
                 INSERT INTO task_results

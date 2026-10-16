@@ -39,9 +39,7 @@ class Probe(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        Index("ix_probes_last_seen_at", "last_seen_at"),
-    )
+    __table_args__ = (Index("ix_probes_last_seen_at", "last_seen_at"),)
 
     def __repr__(self) -> str:
         return f"Probe(id={self.id!r}, alias={self.alias!r}, region_id={self.region_id!r})"

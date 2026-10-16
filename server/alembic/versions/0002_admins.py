@@ -5,6 +5,7 @@ Revises: 0001_init
 Create Date: 2026-10-13 12:00:00.000000
 
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

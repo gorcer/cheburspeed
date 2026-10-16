@@ -92,9 +92,7 @@ class TaskResultArchive(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        Index("ix_task_results_archive_created_at", "created_at"),
-    )
+    __table_args__ = (Index("ix_task_results_archive_created_at", "created_at"),)
 
     def __repr__(self) -> str:
         return (
