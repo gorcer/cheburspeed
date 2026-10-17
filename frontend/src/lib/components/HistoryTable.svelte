@@ -43,14 +43,14 @@
   function entryFromResult(
     result: TaskResult,
     taskId: number,
-    destAddress: string,
+    destName: string,
   ): HistoryEntry {
     return {
       taskId,
       probeId: result.probe_id,
       probeAlias: result.probe_alias,
       speedMbps: result.speed_mbps,
-      destAddress,
+      destName,
       createdAt: result.created_at,
     };
   }
@@ -62,9 +62,9 @@
     } catch {
       return;
     }
-    const destAddress = task.destination_url ?? task.address ?? "—";
+    const destName = task.destination_name ?? "—";
     for (const result of task.results) {
-      historyChecks.add(entryFromResult(result, taskId, destAddress));
+      historyChecks.add(entryFromResult(result, taskId, destName));
     }
   }
 
@@ -129,8 +129,7 @@
               <td class={`px-3 py-2 font-mono ${speedToneClass(entry)}`}>
                 {speedCell(entry)}
               </td>
-              <td class="px-3 py-2 text-surface-content/70"
-                >{entry.destAddress}</td
+              <td class="px-3 py-2 text-surface-content/70">{entry.destName}</td
               >
               <td class="px-3 py-2 text-surface-content/70"
                 >{formatDate(entry.createdAt)}</td
