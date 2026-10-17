@@ -1,6 +1,9 @@
 <script lang="ts">
   import { Link2 } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
   import { createQuery } from "@tanstack/svelte-query";
+  import { untrack } from "svelte";
 
   import {
     listDestinations,
@@ -12,10 +15,36 @@
 
   let { onSubmitted }: { onSubmitted?: () => void } = $props();
 
-  let link = $state("");
+  function parseInitialDestinationId(
+    destinationParam: string | null,
+    fallbackParam: string | null,
+  ): number | null {
+    const raw = destinationParam ?? fallbackParam;
+    if (raw === null || raw === "") return null;
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function parseInitialLink(linkParam: string | null): string {
+    if (linkParam === null) return "";
+    return linkParam.trim().startsWith("vless://") ? linkParam : "";
+  }
+
+  const initialLink = $derived(
+    parseInitialLink(page.url.searchParams.get("link")),
+  );
+  const initialDestinationId = $derived(
+    parseInitialDestinationId(
+      page.url.searchParams.get("destination"),
+      page.url.searchParams.get("destination_id"),
+    ),
+  );
+
+  let link = $state(untrack(() => initialLink));
   let destinationId = $state<number | null>(null);
   let submitting = $state(false);
   let errorMessage = $state<string | null>(null);
+  let destinationSynced = $state(untrack(() => initialDestinationId) === null);
 
   const destinationsQuery = createQuery<
     DestinationList,
@@ -36,6 +65,23 @@
     !submitting && isLinkValid && destinationId !== null,
   );
 
+  $effect(() => {
+    if (destinationSynced) return;
+    if (initialDestinationId === null) {
+      destinationSynced = true;
+      return;
+    }
+    if (destinations.length === 0) return;
+    if (
+      destinations.some(
+        (destination) => destination.id === initialDestinationId,
+      )
+    ) {
+      destinationId = initialDestinationId;
+    }
+    destinationSynced = true;
+  });
+
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
     errorMessage = null;
@@ -52,6 +98,14 @@
     try {
       const created = await createTask(value, { destinationId });
       currentTaskId.set(created.id);
+      const params = new URLSearchParams();
+      params.set("link", value);
+      params.set("destination", String(destinationId));
+      await goto(`?${params.toString()}`, {
+        replaceState: true,
+        keepFocus: true,
+        noScroll: true,
+      });
       onSubmitted?.();
     } catch (error) {
       if (error instanceof ApiError) {

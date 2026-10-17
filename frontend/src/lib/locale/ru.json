@@ -128,6 +128,10 @@
       "listDestinations": {
         "title": "GET /api/v1/destinations",
         "description": "Публичный список адресов speedtest для выпадающего списка на главной."
+      },
+      "urlParams": {
+        "title": "GET /?link=&destination=",
+        "description": "Параметры URL главной страницы: предзаполняют форму запуска теста."
       }
     },
     "wsTitle": "WebSocket",

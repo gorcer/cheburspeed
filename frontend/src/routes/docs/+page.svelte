@@ -8,6 +8,7 @@
     { key: "listRegions" },
     { key: "onlineProbes" },
     { key: "listDestinations" },
+    { key: "urlParams" },
   ] as const;
 
   const adminEndpoints = [
