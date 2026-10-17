@@ -6,6 +6,7 @@ Exposes the JWT-protected routes used by the SvelteKit admin panel:
 * ``probes.py``      — CRUD over ``probes``
 * ``destinations.py`` — CRUD over ``destinations``
 * ``tasks.py``       — read-only filtered listing of ``tasks``
+* ``metrics.py``     — journal over ``metrics``
 * ``stats.py``       — dashboard aggregate
 
 The :func:`build_admin_router` helper aggregates every sub-router so
@@ -16,9 +17,24 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from xspeed_server.app.api.admin import auth, destinations, probes, stats, tasks
+from xspeed_server.app.api.admin import (
+    auth,
+    destinations,
+    metrics,
+    probes,
+    stats,
+    tasks,
+)
 
-__all__ = ["auth", "build_admin_router", "destinations", "probes", "stats", "tasks"]
+__all__ = [
+    "auth",
+    "build_admin_router",
+    "destinations",
+    "metrics",
+    "probes",
+    "stats",
+    "tasks",
+]
 
 
 def build_admin_router() -> APIRouter:
@@ -33,5 +49,6 @@ def build_admin_router() -> APIRouter:
     router.include_router(destinations.router, prefix="/api/v1")
     router.include_router(probes.router, prefix="/api/v1")
     router.include_router(tasks.router, prefix="/api/v1")
+    router.include_router(metrics.router, prefix="/api/v1")
     router.include_router(stats.router, prefix="/api/v1")
     return router

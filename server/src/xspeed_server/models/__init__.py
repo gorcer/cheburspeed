@@ -3,6 +3,7 @@
 from xspeed_server.models.admin import Admin
 from xspeed_server.models.base import Base
 from xspeed_server.models.destination import Destination
+from xspeed_server.models.metric import Metric
 from xspeed_server.models.probe import Probe
 from xspeed_server.models.region import Region
 from xspeed_server.models.result import TaskResult, TaskResultArchive
@@ -12,6 +13,7 @@ __all__ = [
     "Admin",
     "Base",
     "Destination",
+    "Metric",
     "Probe",
     "Region",
     "Task",

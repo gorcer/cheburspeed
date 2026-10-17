@@ -98,6 +98,10 @@
         "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
         "description": "List tasks with filters and detail with per-probe results."
       },
+      "metrics": {
+        "title": "GET/POST /api/v1/admin/metrics",
+        "description": "Metrics journal: append and read client-side samples (speed, load, etc.)."
+      },
       "stats": {
         "title": "GET /api/v1/admin/stats",
         "description": "Dashboard aggregate: per-region medians, speed histogram, archive lag."
@@ -158,7 +162,8 @@
       "dashboard": "Dashboard",
       "probes": "Probes",
       "destinations": "Destinations",
-      "tasks": "Tasks"
+      "tasks": "Tasks",
+      "metrics": "Metrics"
     },
     "dashboard": {
       "totalsTitle": "Totals",
@@ -260,6 +265,32 @@
         "completedAt": "Completed",
         "probeTokens": "Probe tokens",
         "destination": "Speedtest target"
+      }
+    },
+    "metrics": {
+      "createTitle": "Record metric",
+      "listTitle": "Metrics journal",
+      "clientIp": "Client IP",
+      "clientIsp": "ISP",
+      "clientLat": "Latitude",
+      "clientLng": "Longitude",
+      "serverId": "Server",
+      "serverRequired": "Select a server",
+      "ip": "Test IP",
+      "metricAlias": "Metric",
+      "value": "Value",
+      "empty": "No metrics yet",
+      "emptyValue": "—",
+      "submit": "Record",
+      "ispFallback": "provider unknown",
+      "openInMaps": "Open in Google Maps",
+      "columns": {
+        "date": "Date",
+        "client": "Client",
+        "server": "Server",
+        "ip": "ip",
+        "metric": "Metric",
+        "value": "Value"
       }
     }
   },

@@ -98,6 +98,10 @@
         "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
         "description": "Список заданий с фильтрами и детали с результатами."
       },
+      "metrics": {
+        "title": "GET/POST /api/v1/admin/metrics",
+        "description": "Журнал метрик: запись и чтение полученных от клиентов значений (скорость, нагрузка и т.п.)."
+      },
       "stats": {
         "title": "GET /api/v1/admin/stats",
         "description": "Сводка для дашборда: медиана по регионам, гистограмма скоростей, archive_lag."
@@ -158,7 +162,8 @@
       "dashboard": "Дашборд",
       "probes": "Пробы",
       "destinations": "Адреса",
-      "tasks": "Задания"
+      "tasks": "Задания",
+      "metrics": "Метрики"
     },
     "dashboard": {
       "totalsTitle": "Сводка",
@@ -260,6 +265,32 @@
         "completedAt": "Завершено",
         "probeTokens": "Пробы",
         "destination": "Адрес проверки"
+      }
+    },
+    "metrics": {
+      "createTitle": "Записать метрику",
+      "listTitle": "Журнал метрик",
+      "clientIp": "IP клиента",
+      "clientIsp": "Провайдер (ISP)",
+      "clientLat": "Широта",
+      "clientLng": "Долгота",
+      "serverId": "Сервер",
+      "serverRequired": "Выберите сервер",
+      "ip": "IP теста",
+      "metricAlias": "Метрика",
+      "value": "Значение",
+      "empty": "Метрик пока нет",
+      "emptyValue": "—",
+      "submit": "Записать",
+      "ispFallback": "провайдер не определён",
+      "openInMaps": "Открыть в Google Maps",
+      "columns": {
+        "date": "Дата",
+        "client": "Клиент",
+        "server": "Сервер",
+        "ip": "ip",
+        "metric": "Метрика",
+        "value": "Значение"
       }
     }
   },
