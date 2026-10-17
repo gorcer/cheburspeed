@@ -44,6 +44,7 @@
     result: TaskResult,
     taskId: number,
     destName: string,
+    destAddress: string,
   ): HistoryEntry {
     return {
       taskId,
@@ -51,6 +52,7 @@
       probeAlias: result.probe_alias,
       speedMbps: result.speed_mbps,
       destName,
+      destAddress,
       createdAt: result.created_at,
     };
   }
@@ -63,8 +65,9 @@
       return;
     }
     const destName = task.destination_name ?? "—";
+    const destAddress = task.address ?? "—";
     for (const result of task.results) {
-      historyChecks.add(entryFromResult(result, taskId, destName));
+      historyChecks.add(entryFromResult(result, taskId, destName, destAddress));
     }
   }
 
@@ -114,6 +117,8 @@
             >
             <th class="px-3 py-2 font-medium">{t("history.columns.speed")}</th>
             <th class="px-3 py-2 font-medium">{t("history.columns.dest")}</th>
+            <th class="px-3 py-2 font-medium">{t("history.columns.address")}</th
+            >
             <th class="px-3 py-2 font-medium">{t("history.columns.date")}</th>
           </tr>
         </thead>
@@ -130,6 +135,9 @@
                 {speedCell(entry)}
               </td>
               <td class="px-3 py-2 text-surface-content/70">{entry.destName}</td
+              >
+              <td class="px-3 py-2 font-mono text-surface-content/70"
+                >{entry.destAddress}</td
               >
               <td class="px-3 py-2 text-surface-content/70"
                 >{formatDate(entry.createdAt)}</td

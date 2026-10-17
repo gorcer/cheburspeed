@@ -65,6 +65,7 @@
       "probeName": "Probe name",
       "speed": "Speed",
       "dest": "Destination address",
+      "address": "Host",
       "date": "Date"
     }
   },
