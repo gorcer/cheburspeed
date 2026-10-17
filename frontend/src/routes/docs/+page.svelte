@@ -15,7 +15,6 @@
     { key: "probes" },
     { key: "destinations" },
     { key: "tasks" },
-    { key: "metrics" },
     { key: "stats" },
   ] as const;
 

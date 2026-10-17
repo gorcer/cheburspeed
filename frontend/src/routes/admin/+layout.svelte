@@ -12,7 +12,6 @@
     { href: "/admin/probes", label: t("admin.tabs.probes") },
     { href: "/admin/destinations", label: t("admin.tabs.destinations") },
     { href: "/admin/tasks", label: t("admin.tabs.tasks") },
-    { href: "/admin/metrics", label: t("admin.tabs.metrics") },
   ]);
 
   const isActive = (href: string) => {

@@ -75,7 +75,6 @@ async def clean_db(app_env: dict[str, Any]) -> AsyncIterator[None]:
         await conn.execute(
             """
             TRUNCATE TABLE
-                metrics,
                 task_results,
                 tasks,
                 task_results_archive,
