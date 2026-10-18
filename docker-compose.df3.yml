@@ -1,0 +1,52 @@
+# CheburSpeed production stack tailored for df3.
+#
+# Differences from docker-compose.prod.yml shipped with the project:
+#   * no `postgres`      — uses the system-wide postgresql@14-main on df3
+#   * no `nginx`         — uses the system-wide nginx (letsencrypt is also system)
+#   * no `certbot`       — certs are managed by the system certbot + webroot
+# Both server + frontend share the host's network namespace so the system
+# nginx can reverse-proxy to localhost:8000 / localhost:3000 without any
+# host-port mappers showing 5432/8000/3000 to the world.
+#
+# Bring-up:
+#   docker compose -f docker-compose.df3.yml --env-file .env.prod up -d --build
+
+name: cheburspeed
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: cheburspeed-server
+    restart: always
+    network_mode: host
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      WS_HOST: ${WS_HOST:?WS_HOST is required}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN is required}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cheburspeed-frontend
+    restart: always
+    network_mode: host
+    depends_on:
+      - server
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
