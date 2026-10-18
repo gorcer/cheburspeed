@@ -10,6 +10,9 @@ env/
 .env
 .env.local
 .env.*.local
+# Sibling probe configs (DAT-461) — same secrets as ``.env`` and must
+# never land in git. Pattern matches ``.env.mobile``, ``.env.sp`` etc.
+.env.*
 
 # uv
 .uv-cache/

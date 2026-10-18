@@ -1,0 +1,34 @@
+# Stable name for USB-tethered mobile devices (DAT-461).
+#
+# Without this rule the kernel assigns names based on the device MAC
+# (e.g. enxfa5c06d1316b). Phones regenerate the MAC on every USB
+# re-plug, so a probe configured with NETWORK_INTERFACE=enxfa5c06d1316b
+# in .env would silently lose its binding the first time the cable is
+# reseated. Pinning the name to a stable USB identifier (idVendor +
+# idProduct) keeps the interface name constant across reconnects.
+#
+# This rule only matches devices in the "add" phase of the network
+# subsystem, so it cannot collide with built-in NICs. The pinned name
+# is ``usbphone0``; bump the suffix if you need several phones at
+# once.
+#
+# idVendor / idProduct pairs (extend as needed):
+#   * 04e8:6863 — Samsung Galaxy series (RNDIS tethering, the default
+#     in our setup; ``lsusb`` → "Galaxy series, misc. (tethering mode)").
+#
+# Install on a Debian/Ubuntu host:
+#
+#   sudo install -m 0644 90-usb-phone-tether.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger --action=add
+#   ip -o link show usbphone0        # confirm the rename took effect
+#
+# Verify on every boot that the device still appears under that name:
+#
+#   journalctl -u systemd-udevd -n 20
+#
+# Remove the rule if you do not want the rename to happen (the probe
+# will fall back to its default-route behaviour and pick whichever
+# NIC the kernel routes through).
+
+SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="04e8", ATTRS{idProduct}=="6863", NAME="usbphone0"

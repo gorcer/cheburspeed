@@ -27,7 +27,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 from xspeed_probe.config import ProbeSettings, get_settings
-from xspeed_probe.netif import ensure_interface_available
+from xspeed_probe.netif import (
+    InterfaceNoIpError,
+    NetworkInterfaceUnavailableError,
+    ensure_interface_available,
+    resolve_interface_ip,
+)
 from xspeed_probe.speedtest import SpeedtestError, measure
 from xspeed_probe.wsclient import ProbeClient, run_probe
 from xspeed_probe.xray import XrayManager
@@ -90,10 +95,30 @@ async def _run_task(
     ``probe_public_ip`` is the IP the server last observed for this
     probe; when set and :attr:`ProbeSettings.refuse_self_ip_speedtests`
     is true, we skip the run if ``speedtest_url`` resolves to it.
+
+    When ``settings.network_interface`` is set, the probe resolves the
+    interface's IPv4 right before launching xray and forwards it as the
+    ``sendThrough`` field on the vless outbound. The resolution happens
+    on every task so a DHCP lease change between runs is picked up
+    without restarting the probe.
     """
     target_url = speedtest_url or settings.speedtest_url
-    if not ensure_interface_available(settings.network_interface):
-        return None, "netif_unavailable"
+    send_through: str | None = None
+    if settings.network_interface:
+        if not ensure_interface_available(settings.network_interface):
+            return None, "netif_unavailable"
+        try:
+            send_through = resolve_interface_ip(settings.network_interface)
+        except NetworkInterfaceUnavailableError:
+            return None, "netif_unavailable"
+        except InterfaceNoIpError as exc:
+            logger.warning(
+                "task %s: NETWORK_INTERFACE=%r has no routable IPv4 (%s)",
+                task_id,
+                settings.network_interface,
+                exc,
+            )
+            return None, "netif_no_ip"
     if (
         settings.refuse_self_ip_speedtests
         and probe_public_ip
@@ -108,7 +133,7 @@ async def _run_task(
         )
         return None, "self_ip_forbidden"
     try:
-        xray.start(task_id, link)
+        xray.start(task_id, link, send_through=send_through)
     except Exception as exc:  # noqa: BLE001 - surface as result error
         logger.exception("failed to start xray for task %s", task_id)
         return None, f"xray_start_failed: {exc}"

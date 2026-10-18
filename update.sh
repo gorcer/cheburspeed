@@ -140,6 +140,14 @@ elif [[ -f .env ]]; then
 
         docker build -t "$PROBE_IMAGE" -f probe/Dockerfile probe/
         docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+        # Forward ``PROBE_NETWORK_INTERFACE`` (DAT-461) when set so the
+        # probe pins xray's vless outbound to the named interface's
+        # IPv4. The variable is omitted entirely when empty to keep
+        # the legacy behaviour (kernel default route).
+        netif_args=()
+        if [[ -n "${PROBE_NETWORK_INTERFACE:-}" ]]; then
+            netif_args=(-e NETWORK_INTERFACE="$PROBE_NETWORK_INTERFACE")
+        fi
         docker run -d \
             --name "$CONTAINER_NAME" \
             --network=host \
@@ -150,6 +158,7 @@ elif [[ -f .env ]]; then
             -e REGION_CODE="$PROBE_REGION" \
             -e SPEEDTEST_URL="$PROBE_SPEEDTEST_URL" \
             -e LOG_LEVEL="${LOG_LEVEL:-INFO}" \
+            "${netif_args[@]}" \
             "$PROBE_IMAGE"
         echo "   started $CONTAINER_NAME"
     fi

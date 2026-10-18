@@ -85,3 +85,41 @@ def test_config_reality_without_optional_fields_omits_them() -> None:
         "serverName": "example.com",
         "password": "PBK",
     }
+
+
+def test_config_omits_send_through_by_default() -> None:
+    endpoint = VlessEndpoint.from_uri(
+        "vless://11111111-2222-3333-4444-555555555555@example.com:443",
+    )
+    config = build_xray_config(endpoint)
+    outbound = config["outbounds"][0]
+    assert "sendThrough" not in outbound
+
+
+def test_config_omits_send_through_when_none() -> None:
+    endpoint = VlessEndpoint.from_uri(
+        "vless://11111111-2222-3333-4444-555555555555@example.com:443",
+    )
+    config = build_xray_config(endpoint, send_through=None)
+    outbound = config["outbounds"][0]
+    assert "sendThrough" not in outbound
+
+
+def test_config_omits_send_through_when_empty_string() -> None:
+    endpoint = VlessEndpoint.from_uri(
+        "vless://11111111-2222-3333-4444-555555555555@example.com:443",
+    )
+    # Empty string is treated as "unset" so the caller can pass
+    # ``settings.network_interface`` blindly without a None check.
+    config = build_xray_config(endpoint, send_through="")
+    outbound = config["outbounds"][0]
+    assert "sendThrough" not in outbound
+
+
+def test_config_includes_send_through_when_set() -> None:
+    endpoint = VlessEndpoint.from_uri(
+        "vless://11111111-2222-3333-4444-555555555555@example.com:443",
+    )
+    config = build_xray_config(endpoint, send_through="10.189.65.201")
+    outbound = config["outbounds"][0]
+    assert outbound["sendThrough"] == "10.189.65.201"

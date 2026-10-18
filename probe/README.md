@@ -24,9 +24,14 @@ throughput через SOCKS5-прокси.
 * `config.py` — pydantic-settings (`SERVER_URL`, `PROBE_TOKEN`,
   `NETWORK_INTERFACE?`, `SPEEDTEST_URL?`, `PROBE_ALIAS?`, `REGION_CODE?`).
 * `netif.py` — проверяет, что `NETWORK_INTERFACE` присутствует в
-  `socket.if_nameindex()`, иначе шлёт `netif_unavailable`.
+  `socket.if_nameindex()`, иначе шлёт `netif_unavailable`. Дополнительно
+  резолвит IPv4 интерфейса через SIOCGIFADDR; при отсутствии адреса
+  шлёт `netif_no_ip`. xray принимает только IP-литерал в `sendThrough`.
 * `xray.py` — парсит `vless://` URI, генерирует JSON-конфиг и
   запускает `xray-core`; ждёт открытия SOCKS-порта перед замером.
+  Если проба передала IPv4 интерфейса, кладёт его в `sendThrough` —
+  так xray действительно пинит исходящий NIC, а не идёт через
+  default route.
 * `speedtest.py` — `httpx.AsyncClient` через SOCKS-прокси, стримит
   тело ответа, вычисляет Mbps по фактически скачанным байтам.
 * `wsclient.py` — WebSocket-клиент с `ping_interval=30` и
@@ -74,6 +79,30 @@ docker run --rm \
 > Используется `--network=host`, чтобы xray мог слушать на
 > `127.0.0.1:1080` (внутри контейнера) и при этом выполнять исходящие
 > соединения через интерфейс, указанный в `NETWORK_INTERFACE` (на хосте).
+> Имя интерфейса стабилизируется через udev-правило
+> `infra/udev/90-usb-phone-tether.rules` (см. ниже): USB-модемы телефонов
+> по умолчанию получают имена на основе MAC, который меняется при
+> переподключении — без правила проба теряет биндинг после каждого
+> перетыка кабеля.
+
+## Стабильное имя USB-модема
+
+`NETWORK_INTERFACE` ожидает имя интерфейса, которое не меняется между
+переподключениями телефона. USB-tether (RNDIS / CDC-Ethernet) по
+умолчанию получает имя вида `enx<MAC>`, а MAC телефоны перегенерируют
+на каждый реплаг. Подключите правило из `infra/udev/`:
+
+```sh
+sudo install -m 0644 infra/udev/90-usb-phone-tether.rules /etc/udev/rules.d/
+sudo udevadm control --reload
+sudo udevadm trigger --action=add
+ip -o link show usbphone0      # должен появиться USB-Ethernet
+```
+
+После этого `NETWORK_INTERFACE=usbphone0` остаётся валидным независимо
+от того, сколько раз телефон перетыкался. Правило матчит
+`idVendor=04e8 idProduct=6863` (Samsung Galaxy tethering); добавьте
+ещё строки для других телефонов по образцу.
 
 ## Graceful shutdown
 
@@ -88,6 +117,6 @@ WebSocket и завершает все xray-процессы, порождённ
 | `PROBE_TOKEN`      | да                                                          | Bearer-токен для авторизации на сервере               |
 | `PROBE_ALIAS`      | нет                                                         | Человекочитаемое имя пробы                            |
 | `REGION_CODE`      | нет                                                         | Код региона (см. `regions.code` в БД)                 |
-| `NETWORK_INTERFACE`| нет                                                         | Исходящий NIC; отсутствие → задача пропускается       |
+| `NETWORK_INTERFACE`| нет                                                         | Исходящий NIC; проба резолвит его IPv4 (через SIOCGIFADDR) и кладёт в `sendThrough`. Пусто или интерфейс отсутствует → `netif_unavailable`; есть NIC, но без IPv4 → `netif_no_ip`. |
 | `SPEEDTEST_URL`    | нет                                                         | URL для замера скорости                                |
 | `LOG_LEVEL`        | нет (`INFO`)                                               | Уровень логирования                                   |

@@ -39,8 +39,21 @@ require_docker() {
 }
 
 # ---- load .env without overriding already-exported vars ---------------
+# The shell-level ``set -a`` exports every newly-assigned variable, so
+# values that came in through the environment (e.g. when this script is
+# invoked with ``PROBE_CONTAINER=... ./probe.sh create`` or after
+# ``set -a; . .env.mobile``) keep their precedence over the defaults
+# baked into .env.
 if [[ -f .env ]]; then
-    set -a; . ./.env; set +a
+    while IFS='=' read -r key value; do
+        # skip comments and blank lines
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        # honour already-set vars so a sibling config (e.g. .env.mobile)
+        # wins over .env
+        if [[ -z "${!key+x}" ]]; then
+            export "$key=$value"
+        fi
+    done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env)
 fi
 
 # ---- defaults (overridable via .env above) -----------------------------
@@ -59,6 +72,11 @@ export XSPEED_ALLOW_INSECURE_WS="${XSPEED_ALLOW_INSECURE_WS:-1}"
 : "${ADMIN_API_URL:=http://localhost:8001/api/v1/admin}"
 : "${ADMIN_EMAIL:=admin@xspeed.local}"
 : "${ADMIN_PASSWORD:=admin1234}"
+# Optional outbound network interface. When set the probe pins xray's
+# vless outbound to that interface's IPv4 (DAT-461). The variable is
+# unset by default so the existing single-probe deployment keeps
+# working without any change to .env.
+: "${PROBE_NETWORK_INTERFACE:=}"
 
 # ---- subcommands -------------------------------------------------------
 cmd_create() {
@@ -86,6 +104,7 @@ cmd_create() {
 		   speedtest:    $PROBE_SPEEDTEST_URL
 		   image:        $PROBE_IMAGE
 		   container:    $PROBE_CONTAINER
+		   net iface:    ${PROBE_NETWORK_INTERFACE:-<default>}
 		INFO
 
     if [[ "$pull" -eq 1 ]]; then
@@ -103,6 +122,15 @@ cmd_create() {
         docker rm -f "$PROBE_CONTAINER" >/dev/null
     fi
 
+    # Forward ``PROBE_NETWORK_INTERFACE`` to the container as
+    # ``NETWORK_INTERFACE`` so the probe pins xray's outbound to that
+    # NIC's IPv4 (DAT-461). The env is omitted when the variable is
+    # empty to keep the legacy behaviour (kernel default route).
+    netif_args=()
+    if [[ -n "$PROBE_NETWORK_INTERFACE" ]]; then
+        netif_args=(-e NETWORK_INTERFACE="$PROBE_NETWORK_INTERFACE")
+    fi
+
     docker run -d \
         --name "$PROBE_CONTAINER" \
         --network=host \
@@ -114,6 +142,7 @@ cmd_create() {
         -e REGION_CODE="$PROBE_REGION" \
         -e SPEEDTEST_URL="$PROBE_SPEEDTEST_URL" \
         -e LOG_LEVEL="$LOG_LEVEL" \
+        "${netif_args[@]}" \
         "$PROBE_IMAGE" >/dev/null
 
     ok "started $PROBE_CONTAINER"

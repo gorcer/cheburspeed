@@ -302,7 +302,34 @@ make probe-run        # uv run xspeed-probe
 `NETWORK_INTERFACE` проба использует любой доступный интерфейс;
 если переменная задана, но интерфейс отсутствует, проба логирует
 warning и пропускает задание со статусом
-`error="netif_unavailable"`.
+`error="netif_unavailable"`. Если интерфейс есть, но без IPv4 (на
+старте, до получения DHCP-lease) — `error="netif_no_ip"`. IPv4
+резолвится на каждый замер через SIOCGIFADDR и кладётся в
+`sendThrough` vless-outbound — так xray действительно пинит NIC,
+а не идёт через default route.
+
+### Поднять пробу через USB-модем телефона
+
+1. Установите стабильное имя интерфейса через udev:
+   ```sh
+   sudo install -m 0644 infra/udev/90-usb-phone-tether.rules /etc/udev/rules.d/
+   sudo udevadm control --reload && sudo udevadm trigger --action=add
+   ```
+   Без правила `enx<MAC>` USB-телефон меняет имя на каждый
+   переплаг.
+2. Зарегистрируйте в админке вторую пробу на том же регионе:
+   `POST /api/v1/admin/probes` с `alias="primorje-mobile"` и
+   `region_id=<PK>`. Сервер не ограничивает количество проб на
+   регион.
+3. Скопируйте токен в `.env` второй пробы и задайте:
+   ```
+   PROBE_CONTAINER=xspeed-probe-mobile
+   PROBE_ALIAS=primorje-mobile
+   PROBE_REGION=PK
+   PROBE_NETWORK_INTERFACE=usbphone0
+   ```
+4. `./probe.sh create` — проба стартует параллельно первой; обе
+   видны в `/admin/probes` со свежими `last_seen_at`.
 
 ## Документация API
 

@@ -197,6 +197,7 @@ def build_xray_config(
     *,
     socks_host: str = "127.0.0.1",
     socks_port: int = 1080,
+    send_through: str | None = None,
 ) -> dict[str, Any]:
     """Return the xray JSON config that dials ``endpoint`` via SOCKS5.
 
@@ -204,6 +205,15 @@ def build_xray_config(
     https://xtls.github.io/config/ — a single vless outbound pointed at
     the remote server and a single SOCKS5 inbound that the probe's
     HTTP client then dials through.
+
+    When ``send_through`` is provided, it is forwarded as the
+    ``sendThrough`` field on the vless outbound so xray binds the
+    outbound socket to the named interface's IPv4. This is how the
+    probe actually pins ``NETWORK_INTERFACE``: xray ignores interface
+    names, so we resolve the IPv4 (see
+    :func:`xspeed_probe.netif.resolve_interface_ip`) and pass it here.
+    An empty string or ``None`` produces the previous default
+    behaviour, where xray uses the kernel's default route.
 
     Supports the transports operators actually use:
 
@@ -260,6 +270,28 @@ def build_xray_config(
             reality_settings["spiderX"] = endpoint.spx
         stream_settings["security"] = "reality"
         stream_settings["realitySettings"] = reality_settings
+    vless_outbound: dict[str, Any] = {
+        "tag": "vless-out",
+        "protocol": "vless",
+        "settings": {
+            "vnext": [
+                {
+                    "address": endpoint.host,
+                    "port": endpoint.port,
+                    "users": [
+                        {
+                            "id": endpoint.uuid,
+                            "encryption": "none",
+                            "flow": endpoint.flow or "",
+                        },
+                    ],
+                },
+            ],
+        },
+        "streamSettings": stream_settings,
+    }
+    if send_through:
+        vless_outbound["sendThrough"] = send_through
     return {
         "log": {"loglevel": "warning"},
         "inbounds": [
@@ -274,28 +306,7 @@ def build_xray_config(
                 },
             },
         ],
-        "outbounds": [
-            {
-                "tag": "vless-out",
-                "protocol": "vless",
-                "settings": {
-                    "vnext": [
-                        {
-                            "address": endpoint.host,
-                            "port": endpoint.port,
-                            "users": [
-                                {
-                                    "id": endpoint.uuid,
-                                    "encryption": "none",
-                                    "flow": endpoint.flow or "",
-                                },
-                            ],
-                        },
-                    ],
-                },
-                "streamSettings": stream_settings,
-            },
-        ],
+        "outbounds": [vless_outbound],
     }
 
 
@@ -349,8 +360,15 @@ class XrayManager:
     def socks_url(self) -> str:
         return f"socks5://{self._socks_host}:{self._socks_port}"
 
-    def start(self, task_id: int, link: str) -> Path:
+    def start(self, task_id: int, link: str, *, send_through: str | None = None) -> Path:
         """Spawn xray for ``task_id`` using the vless ``link`` from the server.
+
+        ``send_through`` is an optional IPv4 literal that pins the
+        vless outbound to a specific source IP. The probe resolves the
+        IPv4 of ``NETWORK_INTERFACE`` right before each task so a DHCP
+        lease change is picked up automatically. ``None`` falls back
+        to xray's default-route behaviour — the same as before this
+        feature was introduced.
 
         Returns the path to the on-disk JSON config so tests can clean
         it up explicitly. Raises :class:`VlessUriError` if the link is
@@ -361,6 +379,7 @@ class XrayManager:
             endpoint,
             socks_host=self._socks_host,
             socks_port=self._socks_port,
+            send_through=send_through,
         )
         config_path = self._config_dir / f"xray-{task_id}.json"
         write_config(config, config_path)
@@ -503,9 +522,15 @@ class XrayManager:
         )
 
     @contextmanager
-    def task(self, task_id: int, link: str) -> Iterator[Path]:
+    def task(
+        self,
+        task_id: int,
+        link: str,
+        *,
+        send_through: str | None = None,
+    ) -> Iterator[Path]:
         """Context manager that starts xray and guarantees cleanup."""
-        config_path = self.start(task_id, link)
+        config_path = self.start(task_id, link, send_through=send_through)
         try:
             yield config_path
         finally:
