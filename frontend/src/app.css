@@ -7,8 +7,8 @@
   --color-surface-content: #e5e5e5;
   --color-surface-muted: #a3a3a3;
 
-  --color-primary: hsl(0 73% 51%);
-  --color-primary-content: #ffffff;
+  --color-primary: #ffffff;
+  --color-primary-content: #171717;
 
   --color-success: #22c55e;
   --color-warning: #eab308;
