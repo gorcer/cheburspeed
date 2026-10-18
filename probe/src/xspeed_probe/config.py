@@ -65,7 +65,15 @@ class ProbeSettings(BaseSettings):
     xray_socks_port: int = Field(default=1080, ge=1, le=65535)
     xray_config_dir: str = Field(default="/tmp")  # noqa: S108 - ephemeral xray configs
     xray_ready_timeout: float = Field(default=10.0, gt=0.0)
-    speedtest_timeout: float = Field(default=30.0, gt=0.0)
+    speedtest_timeout: float = Field(
+        default=20.0,
+        gt=0.0,
+        description=(
+            "Maximum wall-clock seconds spent streaming the speedtest "
+            "response. When the budget is exhausted the probe returns "
+            "the partial throughput instead of failing (DAT-465)."
+        ),
+    )
     reconnect_initial_delay: float = Field(default=1.0, ge=0.1)
     reconnect_max_delay: float = Field(default=30.0, ge=1.0)
     idle_keepalive_seconds: float = Field(
