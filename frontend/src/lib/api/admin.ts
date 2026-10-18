@@ -13,7 +13,7 @@ export interface LoginResponse {
 export interface AdminProbe {
   id: number;
   alias: string;
-  token: string;
+  token_slice: string;
   region_id: number;
   region_code: string;
   region_title: string;
@@ -21,6 +21,17 @@ export interface AdminProbe {
   is_public: boolean;
   last_seen_at: string | null;
   created_at: string;
+}
+
+export interface AdminProbeCreated extends AdminProbe {
+  token: string;
+}
+
+export interface AdminProbeRotated {
+  id: number;
+  token: string;
+  token_slice: string;
+  rotated_at: string;
 }
 
 export interface AdminProbeList {
@@ -41,7 +52,6 @@ export interface AdminProbeUpdate {
   alias?: string;
   region_id?: number;
   is_public?: boolean;
-  token?: string;
 }
 
 export interface AdminTaskSummary {
@@ -198,8 +208,8 @@ export function listAdminProbes(
 
 export function createAdminProbe(
   payload: AdminProbePayload,
-): Promise<AdminProbe> {
-  return request<AdminProbe>("/v1/admin/probes", {
+): Promise<AdminProbeCreated> {
+  return request<AdminProbeCreated>("/v1/admin/probes", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -212,6 +222,12 @@ export function updateAdminProbe(
   return request<AdminProbe>(`/v1/admin/probes/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function rotateAdminProbeToken(id: number): Promise<AdminProbeRotated> {
+  return request<AdminProbeRotated>(`/v1/admin/probes/${id}/rotate-token`, {
+    method: "POST",
   });
 }
 

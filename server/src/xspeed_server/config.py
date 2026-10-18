@@ -55,6 +55,15 @@ class Settings(BaseSettings):
         description="Window in seconds that defines whether a probe is 'online'.",
     )
 
+    enable_docs: bool = Field(
+        default=False,
+        description=(
+            "Expose /docs, /redoc and /openapi.json. "
+            "Defaults to False: production deployments must keep "
+            "the surface lean (DAT-459)."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

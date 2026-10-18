@@ -11,12 +11,20 @@ show the available choices.
 * ``DELETE /api/v1/admin/destinations/{id}`` — drop a destination;
   ``404`` when the id is unknown, ``409`` when an existing task still
   references it (so history is preserved).
+
+Security (DAT-459, item a): ``url`` is rejected if its hostname is a
+loopback, link-local, private or multicast address (or an IP literal in
+the same range). The probe would otherwise be able to use the vless
+tunnel as a stepping stone to read internal metadata or services.
 """
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from datetime import datetime
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -37,6 +45,58 @@ __all__ = [
     "DestinationOut",
     "DestinationList",
 ]
+
+
+def _hostname_targets_blocked_range(hostname: str) -> bool:
+    """Return ``True`` if every resolved ``hostname`` falls into a blocked range.
+
+    The probe connects to the destination through the vless tunnel — it
+    is *not* direct internet egress — so we treat destinations that
+    point back at the operator's own infrastructure as an SSRF vector
+    and refuse them. We allow the configuration to pass when DNS
+    resolution fails: that's strictly an availability issue (the test
+    will fail at run time) and gives operators an opportunity to set
+    up custom DNS before the tunnel is ready.
+    """
+    if not hostname:
+        return True
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    addresses = {info[4][0] for info in infos}
+    if not addresses:
+        return False
+    try:
+        parsed = [ipaddress.ip_address(addr) for addr in addresses]
+    except ValueError:
+        return False
+    for ip in parsed:
+        if (
+            ip.is_loopback
+            or ip.is_link_local
+            or ip.is_private
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def _validate_destination_url(value: str) -> str:
+    """Reject URLs whose host targets a private / loopback / link-local range."""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("url must use http or https scheme")
+    if not parsed.hostname:
+        raise ValueError("url must include a hostname")
+    if _hostname_targets_blocked_range(parsed.hostname):
+        raise ValueError(
+            "url hostname resolves to a private/loopback/link-local address; "
+            "SSRF destination is not allowed",
+        )
+    return value
 
 
 class DestinationCreate(BaseModel):
@@ -61,6 +121,11 @@ class DestinationCreate(BaseModel):
             raise ValueError("name must not be empty")
         return cleaned
 
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, value: str) -> str:
+        return _validate_destination_url(value)
+
 
 class DestinationUpdate(BaseModel):
     """Payload accepted by ``PUT /api/v1/admin/destinations/{id}``."""
@@ -79,6 +144,13 @@ class DestinationUpdate(BaseModel):
         if not cleaned:
             raise ValueError("name must not be empty")
         return cleaned
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_destination_url(value)
 
 
 class DestinationOut(BaseModel):

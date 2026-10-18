@@ -138,6 +138,8 @@ async def test_claim_task_picks_oldest_pending_task(app_db: Database) -> None:
 
 async def test_claim_task_filters_by_probe_tokens_whitelist(app_db: Database) -> None:
     """A probe outside the whitelist cannot pick up the task."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-a", region_id)
     allowed_task = await _insert_task(VALID_LINK, probe_tokens=["probe-a"])
     other_task = await _insert_task(VALID_LINK, probe_tokens=["probe-b"])
 
@@ -425,10 +427,16 @@ def test_protocol_version_constant_matches_spec() -> None:
 
 def test_claimed_task_is_a_dataclass_with_id_and_link() -> None:
     """Sanity check on the public :class:`ClaimedTask` shape."""
-    sample = ClaimedTask(id=1, link=VALID_LINK, destination_url=None)
+    sample = ClaimedTask(
+        id=1,
+        link=VALID_LINK,
+        destination_url=None,
+        probe_public_ip="203.0.113.10",
+    )
     assert sample.id == 1
     assert sample.link == VALID_LINK
     assert sample.destination_url is None
+    assert sample.probe_public_ip == "203.0.113.10"
 
 
 async def test_claim_task_returns_destination_url_from_join(app_db: Database) -> None:

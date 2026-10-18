@@ -19,9 +19,12 @@ loop exits.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import signal
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 from xspeed_probe.config import ProbeSettings, get_settings
 from xspeed_probe.netif import ensure_interface_available
@@ -32,6 +35,45 @@ from xspeed_probe.xray import XrayManager
 logger = logging.getLogger(__name__)
 
 
+def _destination_targets_self_ip(url: str, own_ip: str | None) -> bool:
+    """Return ``True`` when ``url`` resolves to ``own_ip``.
+
+    DAT-459: a probe must refuse to run a speedtest whose destination
+    resolves to its own public IP — the result would be
+    tautological, wastes the operator's upstream tunnel and could mask
+    measurement regressions. We compare every resolved address so that
+    DNS round-robin tricks still get caught.
+    """
+    if not url or not own_ip:
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    try:
+        own_addr = ipaddress.ip_address(own_ip)
+    except ValueError:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        # DNS lookup failed — let the speedtest fail on its own and
+        # surface the underlying error rather than speculating.
+        return False
+    addresses = {info[4][0] for info in infos}
+    for raw in addresses:
+        try:
+            candidate = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if candidate == own_addr:
+            return True
+    return False
+
+
 async def _run_task(
     task_id: int,
     link: str,
@@ -39,15 +81,32 @@ async def _run_task(
     settings: ProbeSettings,
     xray: XrayManager,
     speedtest_url: str | None = None,
+    probe_public_ip: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Drive a single task to completion and return ``(speed_mbps, error)``.
 
     ``speedtest_url`` overrides :attr:`ProbeSettings.speedtest_url` when
     provided; otherwise the probe falls back to its configured default.
+    ``probe_public_ip`` is the IP the server last observed for this
+    probe; when set and :attr:`ProbeSettings.refuse_self_ip_speedtests`
+    is true, we skip the run if ``speedtest_url`` resolves to it.
     """
     target_url = speedtest_url or settings.speedtest_url
     if not ensure_interface_available(settings.network_interface):
         return None, "netif_unavailable"
+    if (
+        settings.refuse_self_ip_speedtests
+        and probe_public_ip
+        and _destination_targets_self_ip(target_url, probe_public_ip)
+    ):
+        logger.warning(
+            "task %s: refusing to run speedtest because destination %r "
+            "resolves to the probe's own public IP %s",
+            task_id,
+            target_url,
+            probe_public_ip,
+        )
+        return None, "self_ip_forbidden"
     try:
         xray.start(task_id, link)
     except Exception as exc:  # noqa: BLE001 - surface as result error
@@ -88,6 +147,7 @@ def _build_handler(
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         return await _run_task(
             task_id,
@@ -95,6 +155,7 @@ def _build_handler(
             settings=settings,
             xray=xray,
             speedtest_url=destination_url,
+            probe_public_ip=probe_public_ip,
         )
 
     return handler

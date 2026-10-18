@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 from passlib.context import CryptContext
 
 from xspeed_server.config import Settings
@@ -39,7 +40,13 @@ class TokenError(Exception):
 
 @dataclass(slots=True)
 class JWTService:
-    """Encode and decode short-lived JWT tokens for the admin panel."""
+    """Encode and decode short-lived JWT tokens for the admin panel.
+
+    Replaced :mod:`jose` with :mod:`PyJWT` (DAT-459, item V) because
+    python-jose has not seen a release since 2022 and has open CVE
+    backlog; PyJWT has an active maintainer, fewer transitive deps and
+    a cleaner ``InvalidTokenError`` hierarchy.
+    """
 
     secret: str
     algorithm: str
@@ -63,13 +70,19 @@ class JWTService:
         }
         if extra:
             payload.update(extra)
-        return cast(str, jwt.encode(payload, self.secret, algorithm=self.algorithm))
+        return cast(
+            str,
+            jwt.encode(payload, self.secret, algorithm=self.algorithm),
+        )
 
     def decode_token(self, token: str) -> dict[str, Any]:
         """Decode ``token`` and return its payload or raise :class:`TokenError`."""
         try:
-            return cast(dict[str, Any], jwt.decode(token, self.secret, algorithms=[self.algorithm]))
-        except JWTError as exc:
+            return cast(
+                dict[str, Any],
+                jwt.decode(token, self.secret, algorithms=[self.algorithm]),
+            )
+        except InvalidTokenError as exc:
             raise TokenError(str(exc)) from exc
 
 

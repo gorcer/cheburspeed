@@ -5,11 +5,13 @@
 
   import {
     type AdminProbe,
+    type AdminProbeCreated,
     type AdminProbeList,
     ApiError,
     createAdminProbe,
     deleteAdminProbe,
     listAdminProbes,
+    rotateAdminProbeToken,
     updateAdminProbe,
   } from "$lib/api/admin";
   import { listRegions, type RegionList } from "$lib/api/probes";
@@ -61,10 +63,13 @@
   let formToken = $state("");
   let formError = $state<string | null>(null);
   let formSubmitting = $state(false);
+  let lastCreatedToken = $state<AdminProbeCreated | null>(null);
+  let lastCreatedVisible = $state(false);
   let editingId = $state<number | null>(null);
   let editAlias = $state("");
   let editIsPublic = $state(true);
-  let copyState = $state<Record<number, "copied" | "failed" | null>>({});
+  let copyState = $state<Record<string, "copied" | "failed" | null>>({});
+  let lastCopiedFullToken = $state<string | null>(null);
 
   function resetForm() {
     formAlias = "";
@@ -83,12 +88,14 @@
     formError = null;
     formSubmitting = true;
     try {
-      await createAdminProbe({
+      const created = await createAdminProbe({
         alias: formAlias.trim(),
         region_id: formRegionId,
         is_public: formIsPublic,
         token: formToken.trim() || undefined,
       });
+      lastCreatedToken = created;
+      lastCreatedVisible = true;
       resetForm();
       void queryClient.invalidateQueries({ queryKey: ["admin-probes"] });
     } catch (err) {
@@ -96,6 +103,41 @@
     } finally {
       formSubmitting = false;
     }
+  }
+
+  async function rotateToken(probe: AdminProbe) {
+    if (
+      !confirm(
+        t("admin.probes.confirmRotate", {
+          alias: probe.alias || probe.token_slice,
+        }),
+      )
+    ) {
+      return;
+    }
+    try {
+      const rotated = await rotateAdminProbeToken(probe.id);
+      lastCreatedToken = {
+        ...rotated,
+        alias: probe.alias,
+        region_id: probe.region_id,
+        region_code: probe.region_code,
+        region_title: probe.region_title,
+        ip: probe.ip,
+        is_public: probe.is_public,
+        last_seen_at: probe.last_seen_at,
+        created_at: probe.created_at,
+      };
+      lastCreatedVisible = true;
+      void queryClient.invalidateQueries({ queryKey: ["admin-probes"] });
+    } catch (err) {
+      formError = err instanceof Error ? err.message : t("common.error");
+    }
+  }
+
+  function dismissCreatedBanner() {
+    lastCreatedToken = null;
+    lastCreatedVisible = false;
   }
 
   function startEdit(probe: AdminProbe) {
@@ -127,7 +169,7 @@
     if (
       !confirm(
         t("admin.probes.confirmDelete", {
-          alias: probe.alias || probe.token.slice(0, 8),
+          alias: probe.alias || probe.token_slice.slice(0, 8),
         }),
       )
     ) {
@@ -175,7 +217,7 @@
     return ok;
   }
 
-  async function copyToken(probe: AdminProbe) {
+  async function copyFullToken(token: string, key: string) {
     let ok = false;
     if (
       typeof navigator !== "undefined" &&
@@ -184,23 +226,35 @@
       window.isSecureContext
     ) {
       try {
-        await navigator.clipboard.writeText(probe.token);
+        await navigator.clipboard.writeText(token);
         ok = true;
       } catch {
         ok = false;
       }
     }
     if (!ok) {
-      ok = await copyViaExecCommand(probe.token);
+      ok = await copyViaExecCommand(token);
     }
-    copyState = { ...copyState, [probe.id]: ok ? "copied" : "failed" };
+    const nextState = { ...copyState } as Record<string, "copied" | "failed">;
+    nextState[key] = ok ? "copied" : "failed";
+    copyState = nextState;
+    lastCopiedFullToken = ok ? token : lastCopiedFullToken;
     setTimeout(() => {
-      if (copyState[probe.id] === (ok ? "copied" : "failed")) {
-        const next = { ...copyState };
-        delete next[probe.id];
+      const state = copyState as Record<string, "copied" | "failed">;
+      if (state[key] === (ok ? "copied" : "failed")) {
+        const next = { ...state };
+        delete next[key];
         copyState = next;
       }
     }, 1800);
+  }
+
+  async function copyToken(probe: AdminProbe) {
+    await copyFullToken(probe.token_slice, `slice-${probe.id}`);
+  }
+
+  async function copyCreatedToken(token: string) {
+    await copyFullToken(token, "created");
   }
 
   function refresh() {
@@ -240,6 +294,63 @@
 </svelte:head>
 
 <div class="space-y-5">
+  {#if lastCreatedToken && lastCreatedVisible}
+    <section
+      aria-labelledby="probe-token-banner-title"
+      class="rounded-card border border-primary/50 bg-primary/10 p-4"
+      data-testid="probe-token-banner"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h2
+            id="probe-token-banner-title"
+            class="text-sm font-semibold text-primary"
+          >
+            {t("admin.probes.tokenBannerTitle", {
+              alias:
+                lastCreatedToken.alias || lastCreatedToken.token.slice(0, 8),
+            })}
+          </h2>
+          <p class="mt-1 text-xs text-surface-content/70">
+            {t("admin.probes.tokenBannerBody")}
+          </p>
+          <div class="mt-3 flex items-center gap-2">
+            <code
+              class="flex-1 truncate rounded bg-surface-100 px-2 py-1 font-mono text-[11px]"
+              data-testid="probe-token-banner-value"
+            >
+              {lastCreatedToken.token}
+            </code>
+            <button
+              type="button"
+              onclick={() => copyCreatedToken(lastCreatedToken?.token ?? "")}
+              class="inline-flex items-center gap-1 rounded-pill border border-primary px-2 py-1 text-xs text-primary transition hover:bg-primary/10"
+              aria-label={t("admin.probes.copyToken")}
+            >
+              {#if copyState["created"] === "copied"}
+                <Check size={12} aria-hidden="true" />
+                <span>{t("admin.probes.copyTokenCopied")}</span>
+              {:else if copyState["created"] === "failed"}
+                <Copy size={12} aria-hidden="true" />
+                <span>{t("admin.probes.copyTokenFailed")}</span>
+              {:else}
+                <Copy size={12} aria-hidden="true" />
+                <span>{t("admin.probes.copyToken")}</span>
+              {/if}
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          onclick={dismissCreatedBanner}
+          class="text-xs text-surface-content/60 transition hover:text-danger"
+          aria-label={t("common.dismiss")}
+        >
+          ✕
+        </button>
+      </div>
+    </section>
+  {/if}
   <section
     aria-labelledby="probe-form-title"
     class="rounded-card border border-surface-300 bg-surface-200/60 p-5"
@@ -393,18 +504,18 @@
                     <code
                       class="rounded bg-surface-100/40 px-1.5 py-0.5 font-mono text-[11px]"
                     >
-                      {probe.token.slice(0, 12)}…
+                      {probe.token_slice}
                     </code>
                     <button
                       type="button"
                       onclick={() => copyToken(probe)}
                       class="text-surface-content/60 transition hover:text-primary disabled:cursor-default disabled:opacity-100"
                       aria-label={t("admin.probes.copyToken")}
-                      title={copyState[probe.id] === "failed"
-                        ? probe.token
+                      title={copyState[`slice-${probe.id}`] === "failed"
+                        ? t("admin.probes.copyTokenFailedHint")
                         : undefined}
                     >
-                      {#if copyState[probe.id] === "copied"}
+                      {#if copyState[`slice-${probe.id}`] === "copied"}
                         <Check
                           size={12}
                           class="text-success"
@@ -413,7 +524,7 @@
                         <span class="sr-only"
                           >{t("admin.probes.copyTokenCopied")}</span
                         >
-                      {:else if copyState[probe.id] === "failed"}
+                      {:else if copyState[`slice-${probe.id}`] === "failed"}
                         <Copy
                           size={12}
                           class="text-danger"
@@ -425,6 +536,15 @@
                       {:else}
                         <Copy size={12} aria-hidden="true" />
                       {/if}
+                    </button>
+                    <button
+                      type="button"
+                      onclick={() => rotateToken(probe)}
+                      class="text-surface-content/60 transition hover:text-primary"
+                      aria-label={t("admin.probes.rotateToken")}
+                      title={t("admin.probes.rotateTokenHint")}
+                    >
+                      <RefreshCw size={12} aria-hidden="true" />
                     </button>
                   </div>
                 </td>

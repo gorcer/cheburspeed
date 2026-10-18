@@ -155,7 +155,7 @@ async def _insert_task(
         )
     except Exception as exc:  # noqa: BLE001 - translate FK violation to 404
         if _is_foreign_key_violation(exc):
-            raise HTTPException(status_code=404, detail="Destination not found") from exc
+            raise HTTPException(status_code=404, detail="Not found") from exc
         raise
     if row is None:  # pragma: no cover - RETURNING is guaranteed by Postgres
         raise HTTPException(status_code=500, detail="Failed to create task")
@@ -269,7 +269,7 @@ async def create_task(
     async with pool.acquire() as conn:
         destination = await _resolve_destination(conn, payload.destination_id)
         if destination is None:
-            raise HTTPException(status_code=404, detail="Destination not found")
+            raise HTTPException(status_code=404, detail="Not found")
         task_id = await _insert_task(
             conn,
             payload.link,

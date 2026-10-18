@@ -202,7 +202,13 @@
       "copyToken": "Copy token",
       "copyTokenCopied": "Token copied",
       "copyTokenFailed": "Copy failed — please copy manually",
+      "copyTokenFailedHint": "Use the rotate button to copy a new token",
+      "rotateToken": "Rotate token",
+      "rotateTokenHint": "Issue a new token (current token is invalidated immediately)",
       "confirmDelete": "Delete probe «{{alias}}»?",
+      "confirmRotate": "Rotate token for «{{alias}}»? The previous token will stop working immediately.",
+      "tokenBannerTitle": "New probe token for «{{alias}}»",
+      "tokenBannerBody": "This is the only time the plaintext token is shown. Copy it now and store it in your secrets manager — the list view will only display the first 12 characters.",
       "pageOf": "Page {{current}} of {{total}}",
       "prev": "Prev",
       "next": "Next",
@@ -271,6 +277,7 @@
   "common": {
     "loading": "Loading…",
     "error": "Error",
-    "retry": "Retry"
+    "retry": "Retry",
+    "dismiss": "Dismiss"
   }
 }

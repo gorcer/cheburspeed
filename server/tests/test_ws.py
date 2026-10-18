@@ -292,6 +292,63 @@ async def test_ws_records_probe_metadata_from_online_message(ws_client: Any) -> 
     assert row["last_seen_at"] is not None
 
 
+async def test_ws_ignores_spoofed_region_code_from_probe(ws_client: Any) -> None:
+    """A probe must not be able to relocate itself just by sending a
+    ``region_code`` (DAT-459, item C).
+
+    Setup: a region ``real`` is assigned to the probe at registration.
+    The probe then connects and claims ``region_code = spoofed``. The
+    server logs a warning and keeps the original ``region_id`` —
+    subsequent task assignments still surface ``region_id = real``.
+    """
+    real_id = await _seed_region(code="REAL", title="Real region")
+    await _seed_region(code="SPOOF", title="Spoofed region")
+    token = "probe-token-spoof-test"
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        await conn.execute(
+            """
+            INSERT INTO probes (alias, token, region_id, is_public)
+            VALUES ($1, $2, $3, TRUE)
+            """,
+            "probe-spoof",
+            token,
+            real_id,
+        )
+        task_id = await conn.fetchval(
+            "INSERT INTO tasks (link, status) VALUES ($1, 'pending') RETURNING id",
+            VALID_LINK,
+        )
+    finally:
+        await conn.close()
+
+    with ws_client.websocket_connect(
+        "/ws", headers={"Authorization": f"Bearer {token}"}
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "online",
+                "alias": "probe-spoof",
+                "region_code": "SPOOF",
+                "version": "0.1.0",
+                "netif": "eth0",
+                "protocol_version": 1,
+            }
+        )
+        envelope = websocket.receive_json()
+        assigned = envelope
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow("SELECT region_id, alias FROM probes WHERE token = $1", token)
+    finally:
+        await conn.close()
+
+    assert row["region_id"] == real_id
+    assert assigned["task_id"] == task_id
+
+
 __all__ = [
     "test_ws_closes_with_4001_when_authorization_header_missing",
     "test_ws_closes_with_4001_when_token_unknown",

@@ -29,6 +29,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
       - xspeed_net
 
@@ -46,12 +53,25 @@ services:
       WS_HOST: ${WS_HOST:?WS_HOST is required}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN is required}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
       - xspeed_net
 
@@ -67,6 +87,18 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
       - xspeed_net
 
@@ -79,6 +111,13 @@ services:
     volumes:
       - ./nginx/certbot/www:/var/www/certbot:rw
       - certbot_conf:/etc/letsencrypt:rw
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
     entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
     networks:
       - xspeed_net
@@ -89,6 +128,8 @@ services:
     volumes:
       - ./nginx/certbot/www:/var/www/certbot:rw
       - certbot_conf:/etc/letsencrypt:rw
+    security_opt:
+      - no-new-privileges:true
     entrypoint: /bin/sh -c "certbot certonly --webroot -w /var/www/certbot --email ${CERTBOT_EMAIL:?CERTBOT_EMAIL is required} --agree-tos --no-eff-email -d ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}"
     networks:
       - xspeed_net
@@ -121,6 +162,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
       - xspeed_net
 

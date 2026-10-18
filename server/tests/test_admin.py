@@ -175,6 +175,7 @@ async def test_probes_listing_and_crud_round_trip(
     assert created["region_title"] == "Москва"
     assert created["is_public"] is True
     assert isinstance(created["token"], str) and len(created["token"]) >= 16
+    assert isinstance(created["token_slice"], str) and created["token_slice"].endswith("\u2026")
     probe_id = created["id"]
 
     # The list now contains exactly one probe.
@@ -183,6 +184,9 @@ async def test_probes_listing_and_crud_round_trip(
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["id"] == probe_id
+    # The plaintext token must NOT leak through the list endpoint (DAT-459, item M).
+    assert "token" not in body["items"][0]
+    assert body["items"][0]["token_slice"] == created["token_slice"]
 
     # Update the alias
     response = await client.put(
@@ -246,6 +250,84 @@ async def test_probe_create_with_unknown_region_returns_404(
         headers=headers,
     )
     assert response.status_code == 404, response.text
+
+
+async def test_probe_listing_never_returns_plaintext_token(
+    client: AsyncClient,
+    app_instance: Any,
+    regions: list[dict[str, Any]],
+) -> None:
+    """Token must not leak in list / detail / update responses (DAT-459, item M)."""
+    token = await _seed_admin(app_instance)
+    headers = _bearer(token)
+
+    create_resp = await client.post(
+        "/api/v1/admin/probes",
+        json={
+            "alias": "leak-check",
+            "region_id": regions[0]["id"],
+            "token": "manual-token-for-leak-check",
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    probe_id = created["id"]
+
+    # List never exposes the plaintext token.
+    list_resp = await client.get("/api/v1/admin/probes", headers=headers)
+    assert list_resp.status_code == 200
+    list_dump = list_resp.text
+    assert "manual-token-for-leak-check" not in list_dump
+    assert "token" not in list_resp.json()["items"][0]
+
+    # Update response never exposes the plaintext token.
+    update_resp = await client.put(
+        f"/api/v1/admin/probes/{probe_id}",
+        json={"alias": "renamed"},
+        headers=headers,
+    )
+    assert update_resp.status_code == 200
+    assert "token" not in update_resp.json()
+    assert "manual-token-for-leak-check" not in update_resp.text
+
+
+async def test_probe_rotate_token_returns_new_plaintext_once(
+    client: AsyncClient,
+    app_instance: Any,
+    regions: list[dict[str, Any]],
+) -> None:
+    """``rotate-token`` returns a fresh plaintext token and invalidates the old one."""
+    token = await _seed_admin(app_instance)
+    headers = _bearer(token)
+
+    create_resp = await client.post(
+        "/api/v1/admin/probes",
+        json={"alias": "rot", "region_id": regions[0]["id"], "token": "old-token-aaaaaa"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    probe_id = create_resp.json()["id"]
+
+    rotate_resp = await client.post(
+        f"/api/v1/admin/probes/{probe_id}/rotate-token",
+        headers=headers,
+    )
+    assert rotate_resp.status_code == 200, rotate_resp.text
+    rotated = rotate_resp.json()
+    assert rotated["id"] == probe_id
+    assert rotated["token"] != "old-token-aaaaaa"
+    assert len(rotated["token"]) >= 16
+    assert rotated["token_slice"].endswith("\u2026")
+
+    # After rotate, the list endpoint still does not leak the new plaintext.
+    list_resp = await client.get("/api/v1/admin/probes", headers=headers)
+    assert list_resp.status_code == 200
+    assert rotated["token"] not in list_resp.text
+
+    # Rotating an unknown probe yields 404.
+    missing_resp = await client.post("/api/v1/admin/probes/999999/rotate-token", headers=headers)
+    assert missing_resp.status_code == 404
 
 
 async def test_admin_tasks_listing_with_filters(

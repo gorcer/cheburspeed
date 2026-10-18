@@ -5,7 +5,12 @@
 # native platform — the `--platform=$BUILDPLATFORM` flag pins this
 # stage regardless of the multi-arch target list, so xray is downloaded
 # exactly once with the right architecture.
-FROM --platform=$BUILDPLATFORM teddysun/xray:latest AS xray
+#
+# Pinned to a known release tag instead of :latest (DAT-459, item o)
+# so unexpected upstream changes / CVE patches cannot break production
+# builds without an explicit bump.
+ARG XRAY_VERSION=1.8.4
+FROM --platform=$BUILDPLATFORM teddysun/xray:${XRAY_VERSION} AS xray
 
 # Stage 2: Python probe -------------------------------------------------
 # Targets the architecture the image will run on. We copy the xray
@@ -16,7 +21,8 @@ FROM --platform=$TARGETPLATFORM python:3.12-slim AS probe
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    XSPEED_PROBE_XRAY_VERSION=${XRAY_VERSION}
 
 WORKDIR /app
 

@@ -50,6 +50,11 @@ fi
 : "${PROBE_ALIAS:=$PROBE_REGION}"
 : "${PROBE_SERVER_URL:=ws://localhost:8001/ws}"
 : "${PROBE_SPEEDTEST_URL:=https://speed.cloudflare.com/__down?bytes=10000000}"
+# ``ws://`` is rejected by the probe in production (DAT-459, item g)
+# because the bearer token would otherwise travel in clear text.
+# Local docker-compose uses plain HTTP on a forwarded port, so the
+# probe image refuses to start without an explicit escape hatch.
+export XSPEED_ALLOW_INSECURE_WS="${XSPEED_ALLOW_INSECURE_WS:-1}"
 : "${LOG_LEVEL:=INFO}"
 : "${ADMIN_API_URL:=http://localhost:8001/api/v1/admin}"
 : "${ADMIN_EMAIL:=admin@xspeed.local}"
@@ -103,6 +108,7 @@ cmd_create() {
         --network=host \
         --restart unless-stopped \
         -e SERVER_URL="$PROBE_SERVER_URL" \
+        -e XSPEED_ALLOW_INSECURE_WS="${XSPEED_ALLOW_INSECURE_WS:-1}" \
         -e PROBE_TOKEN="$PROBE_TOKEN" \
         -e PROBE_ALIAS="$PROBE_ALIAS" \
         -e REGION_CODE="$PROBE_REGION" \

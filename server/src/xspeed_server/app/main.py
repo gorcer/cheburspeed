@@ -89,12 +89,17 @@ def _configure_cors(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     """Build and return a fully-configured FastAPI application."""
-    app = FastAPI(
+    settings = get_settings()
+    enable_docs = settings.enable_docs
+    app_kwargs: dict[str, Any] = dict(
         title="CheburSpeed API",
         version="0.1.0",
         description="HTTP API for the CheburSpeed vless speedtest service.",
         lifespan=lifespan,
     )
+    if not enable_docs:
+        app_kwargs.update(docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(**app_kwargs)
     _configure_cors(app)
 
     app.state.limiter = limiter

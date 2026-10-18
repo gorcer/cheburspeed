@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+import os
+from typing import Any
+
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SPEEDTEST_URL: str = "https://speed.cloudflare.com/__down?bytes=100000000"
@@ -18,12 +21,25 @@ class ProbeSettings(BaseSettings):
         extra="ignore",
     )
 
+    allow_insecure_ws: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "allow_insecure_ws",
+            "XSPEED_ALLOW_INSECURE_WS",
+            "ALLOW_INSECURE_WS",
+        ),
+        description=(
+            "Allow ``ws://`` server URLs. Must stay False in production "
+            "(DAT-459, item g) — the bearer token would otherwise travel "
+            "in clear text. Set to True only for local development."
+        ),
+    )
     probe_token: str = Field(
         ...,
         description="Token used to authenticate this probe against the server.",
     )
     server_url: str = Field(
-        default="ws://server:8080/ws",
+        default="wss://server/ws",
         description="WebSocket endpoint exposed by the CheburSpeed server.",
     )
     probe_alias: str = Field(
@@ -62,6 +78,49 @@ class ProbeSettings(BaseSettings):
     )
     log_level: str = Field(default="INFO")
     version: str = Field(default="0.1.0")
+    refuse_self_ip_speedtests: bool = Field(
+        default=True,
+        description=(
+            "When True (default) the probe refuses to run a speedtest "
+            "against a destination whose host resolves to the probe's "
+            "own public IP — which would otherwise produce a tautological "
+            "measurement and waste the upstream tunnel (DAT-459)."
+        ),
+    )
+
+    @field_validator("server_url")
+    @classmethod
+    def _check_server_url(cls, value: str, info: Any) -> str:
+        """Reject ``ws://`` URLs unless ``allow_insecure_ws`` is explicitly set.
+
+        The probe always carries a bearer token: ``ws://`` would leak it
+        on every reconnect. ``wss://`` is enforced by default; the dev
+        escape hatch is set through ``ALLOW_INSECURE_WS=true`` (or the
+        ``XSPEED_ALLOW_INSECURE_WS`` env var for the bash wrapper).
+        """
+        if not value:
+            raise ValueError("SERVER_URL must not be empty")
+        lowered = value.lower()
+        if lowered.startswith("wss://") or lowered.startswith("ws+unix://"):
+            return value
+        if lowered.startswith("ws://"):
+            # ``allow_insecure_ws`` is declared first but may not be
+            # populated yet — fall back to the env vars so test code
+            # that only mutates ``os.environ`` still works.
+            raw_allow = info.data.get("allow_insecure_ws") if info.data else None
+            env_allow = (
+                os.environ.get("ALLOW_INSECURE_WS", "")
+                or os.environ.get("XSPEED_ALLOW_INSECURE_WS", "")
+            ).lower() in {"1", "true", "yes"}
+            if bool(raw_allow) or env_allow:
+                return value
+            raise ValueError(
+                "SERVER_URL must use wss:// in production; set "
+                "ALLOW_INSECURE_WS=true only for local development",
+            )
+        raise ValueError(
+            f"SERVER_URL must start with ws:// or wss:// (got {value[:32]!r})",
+        )
 
 
 def get_settings() -> ProbeSettings:

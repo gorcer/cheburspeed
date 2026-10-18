@@ -45,6 +45,7 @@ class ClaimedTask:
     id: int
     link: str
     destination_url: str | None
+    probe_public_ip: str | None
 
 
 async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask | None:
@@ -67,25 +68,27 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
     the same transaction. The destination URL is joined from
     ``destinations`` so the dispatcher can pass an override to the
     probe instead of letting it fall back to its
-    ``settings.speedtest_url``.
+    ``settings.speedtest_url``. The probe's most recently seen IP is
+    attached so the probe can refuse to run a speedtest against its
+    own public address (DAT-459).
     """
     async with conn.transaction():
         row = await conn.fetchrow(
             """
-            SELECT t.id, t.link, d.url AS destination_url
+            SELECT t.id, t.link, d.url AS destination_url, p.ip AS probe_ip
             FROM tasks t
             LEFT JOIN destinations d ON d.id = t.destination_id
+            CROSS JOIN probes p
             WHERE t.status = 'pending'
+              AND p.token = $1
               AND NOT EXISTS (
                   SELECT 1
                   FROM task_results tr
-                  JOIN probes p ON p.id = tr.probe_id
-                  WHERE tr.task_id = t.id AND p.token = $1
+                  JOIN probes p2 ON p2.id = tr.probe_id
+                  WHERE tr.task_id = t.id AND p2.token = $1
               )
               AND (
-                  (t.probe_tokens IS NULL AND EXISTS (
-                      SELECT 1 FROM probes p WHERE p.token = $1 AND p.is_public
-                  ))
+                  (t.probe_tokens IS NULL AND p.is_public)
                   OR t.probe_tokens ? $1
               )
             ORDER BY t.created_at, t.id
@@ -99,6 +102,7 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
         task_id = int(row["id"])
         link = str(row["link"])
         destination_url: str | None = row["destination_url"]
+        probe_public_ip: str | None = row["probe_ip"]
         await conn.execute(
             """
             UPDATE tasks
@@ -111,7 +115,12 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
             probe_token,
         )
     logger.info("dispatched task %s to probe %s", task_id, _mask_token(probe_token))
-    return ClaimedTask(id=task_id, link=link, destination_url=destination_url)
+    return ClaimedTask(
+        id=task_id,
+        link=link,
+        destination_url=destination_url,
+        probe_public_ip=probe_public_ip,
+    )
 
 
 async def check_completion(conn: asyncpg.Connection, task_id: int) -> bool:
@@ -267,6 +276,7 @@ async def dispatch_to_probe(db: Database, hub: Hub, probe_token: str) -> bool:
         link=claimed.link,
         destination_url=claimed.destination_url,
         protocol_version=PROTOCOL_VERSION,
+        probe_public_ip=claimed.probe_public_ip,
     ).model_dump()
     delivered = await hub.send(probe_token, message)
     if delivered:

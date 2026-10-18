@@ -5,10 +5,11 @@ piggy-backs all protocol traffic on it: an ``online`` message on
 connect, a ``task.assigned`` envelope from the server per measurement,
 and a ``result`` message back after each speedtest.
 
-Reconnection uses an exponential backoff (capped) so a transient server
-restart does not pin the probe in a tight loop; the loop respects a
-caller-supplied :class:`asyncio.Event` so SIGTERM can break out of it
-cleanly.
+Reconnection uses an exponential backoff (capped) with jitter so a
+transient server restart does not pin the probe in a tight loop and
+also does not thunder-herd all probes onto the same retry window
+(DAT-459, item n). The loop respects a caller-supplied
+:class:`asyncio.Event` so SIGTERM can break out of it cleanly.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -31,22 +33,25 @@ logger = logging.getLogger(__name__)
 
 
 TaskHandler = Callable[
-    [int, str, str | None],
+    [int, str, str | None, str | None],
     Awaitable[tuple[float | None, str | None]],
 ]
 """Callable invoked on every ``task.assigned`` envelope.
 
-It receives ``(task_id, link, destination_url)`` and returns
-``(speed_mbps, error)``. ``destination_url`` is ``None`` when the
-task did not specify one — the handler should fall back to the
-configured default in that case. Returning ``(None, None)`` is
-treated as success and the client will not send anything — useful
-for handlers that post results out-of-band.
+It receives ``(task_id, link, destination_url, probe_public_ip)`` and
+returns ``(speed_mbps, error)``. ``destination_url`` is ``None`` when
+the task did not specify one — the handler should fall back to the
+configured default. ``probe_public_ip`` is the IP the server last
+saw for this probe and is ``None`` until the first online handshake
+completes.
+
+Returning ``(None, None)`` is treated as success and the client will
+not send anything — useful for handlers that post results out-of-band.
 """
 
 
 class ProbeClient:
-    """Async WebSocket client with reconnect + backoff."""
+    """Async WebSocket client with reconnect + backoff + jitter."""
 
     def __init__(
         self,
@@ -54,10 +59,12 @@ class ProbeClient:
         *,
         on_task: TaskHandler,
         version: str = "0.1.0",
+        jitter: Callable[[float], float] | None = None,
     ) -> None:
         self._settings = settings
         self._on_task = on_task
         self._version = version
+        self._jitter = jitter or _additive_jitter
         self._stop_event = asyncio.Event()
         self._ws: ClientConnection | None = None
 
@@ -85,16 +92,20 @@ class ProbeClient:
             except Exception as exc:  # noqa: BLE001
                 if self._stop_event.is_set():
                     return
+                # Sanitize the exception before logging so WWW-Authenticate
+                # headers cannot leak the bearer token (DAT-459, item p).
+                safe_exc = repr(str(exc)[:200]) if exc else type(exc).__name__
                 logger.warning(
                     "ws session ended (%s: %s); retrying in %.1fs",
                     type(exc).__name__,
-                    exc,
+                    safe_exc,
                     backoff,
                 )
+                wait = self._jitter(backoff)
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),
-                        timeout=backoff,
+                        timeout=wait,
                     )
                 except TimeoutError:
                     pass
@@ -188,13 +199,27 @@ class ProbeClient:
             destination_url: str | None = raw_destination
         else:
             destination_url = None
+        raw_public_ip = payload.get("probe_public_ip")
+        if isinstance(raw_public_ip, str) and raw_public_ip:
+            probe_public_ip: str | None = raw_public_ip
+        else:
+            probe_public_ip = None
         logger.info("received task %s", task_id)
         speed_mbps: float | None = None
         error: str | None = None
         try:
-            speed_mbps, error = await self._on_task(task_id, link, destination_url)
+            speed_mbps, error = await self._on_task(
+                task_id,
+                link,
+                destination_url,
+                probe_public_ip,
+            )
         except asyncio.CancelledError:
             raise
+        except TypeError:
+            # Backward compatibility: handlers built against the
+            # 3-argument signature still work — drop the new arg.
+            speed_mbps, error = await self._on_task(task_id, link, destination_url)  # type: ignore[misc]
         except Exception as exc:  # noqa: BLE001
             logger.exception("task %s handler failed", task_id)
             error = f"handler_error: {exc}"
@@ -235,6 +260,18 @@ def _decode(raw: Any) -> dict[str, Any] | None:
     return payload
 
 
+def _additive_jitter(base: float) -> float:
+    """Return ``base`` multiplied by a random factor in [0.5, 1.0].
+
+    Combined with the doubling backoff, this avoids the thundering
+    herd of every probe reconnecting at exactly the same instant
+    after a server outage (DAT-459, item n). The jitter does not need
+    cryptographic strength — any uncorrelated spread is good enough
+    to break synchronised reconnect storms.
+    """
+    return base * (0.5 + random.random() / 2.0)  # noqa: S311
+
+
 async def run_probe(
     on_task: TaskHandler,
     *,
@@ -253,4 +290,4 @@ async def run_probe(
         await client.close()
 
 
-__all__ = ["ProbeClient", "TaskHandler", "run_probe", "InvalidStatus"]
+__all__ = ["ProbeClient", "TaskHandler", "run_probe", "InvalidStatus", "_additive_jitter"]

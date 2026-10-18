@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from xspeed_server.app.config import Settings, get_settings
+from xspeed_server.app.core.ratelimit import limiter
 from xspeed_server.app.core.security import JWTService, verify_password
 from xspeed_server.app.deps import PoolDep
 
@@ -64,7 +65,9 @@ def _build_jwt_service(request: Request) -> JWTService:
     response_model=LoginResponse,
     summary="Exchange admin credentials for a JWT.",
 )
+@limiter.limit("10/minute")
 async def login(
+    request: Request,  # required by slowapi to extract the client IP
     payload: LoginRequest,
     pool: PoolDep,
     jwt_service: Annotated[JWTService, Depends(_build_jwt_service)],

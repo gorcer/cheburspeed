@@ -65,6 +65,52 @@ async def test_admin_destination_create_rejects_invalid_url(
     assert any(item["loc"] == ["body", "url"] for item in detail["detail"])
 
 
+async def test_admin_destination_create_rejects_loopback_url(
+    client: AsyncClient, app_instance: Any
+) -> None:
+    """SSRF defense (DAT-459, item a): loopback / private URLs must be rejected."""
+    token = await _seed_admin(app_instance)
+    headers = _bearer(token)
+
+    for bad_url in (
+        "http://127.0.0.1/internal",
+        "http://localhost/admin",
+        "https://10.0.0.5/dashboard",
+        "http://169.254.169.254/latest/meta-data/",
+    ):
+        response = await client.post(
+            "/api/v1/admin/destinations",
+            json={"name": f"bad-{bad_url}", "url": bad_url},
+            headers=headers,
+        )
+        assert response.status_code == 422, (bad_url, response.text)
+        detail = response.json()
+        assert any(item["loc"] == ["body", "url"] for item in detail["detail"]), bad_url
+
+
+async def test_admin_destination_update_rejects_loopback_url(
+    client: AsyncClient, app_instance: Any
+) -> None:
+    """The same SSRF guard applies to PUT/PATCH (DAT-459, item a)."""
+    token = await _seed_admin(app_instance)
+    headers = _bearer(token)
+
+    create_resp = await client.post(
+        "/api/v1/admin/destinations",
+        json={"name": "good", "url": "https://speed.example.com/__down"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    destination_id = create_resp.json()["id"]
+
+    update_resp = await client.put(
+        f"/api/v1/admin/destinations/{destination_id}",
+        json={"url": "http://192.168.1.1/admin"},
+        headers=headers,
+    )
+    assert update_resp.status_code == 422, update_resp.text
+
+
 async def test_admin_destination_create_round_trip(client: AsyncClient, app_instance: Any) -> None:
     token = await _seed_admin(app_instance)
     headers = _bearer(token)

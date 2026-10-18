@@ -79,7 +79,7 @@ def fake_connect() -> Any:
 def _settings(**overrides: Any) -> ProbeSettings:
     base = {
         "probe_token": "tok",
-        "server_url": "ws://server/ws",
+        "server_url": "wss://server/ws",
         "probe_alias": "lab",
         "region_code": "msk",
         "network_interface": None,
@@ -128,14 +128,15 @@ async def _drive(
 
 async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> None:
     _connect, sockets = fake_connect
-    handler_calls: list[tuple[int, str, str | None]] = []
+    handler_calls: list[tuple[int, str, str | None, str | None]] = []
 
     async def on_task(
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
-        handler_calls.append((task_id, link, destination_url))
+        handler_calls.append((task_id, link, destination_url, probe_public_ip))
         return 12.5, None
 
     settings = _settings()
@@ -156,9 +157,10 @@ async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> Non
                     "task_id": 7,
                     "link": "vless://x@example.com:443",
                     "destination_url": "https://speed.example.com/__down?bytes=100000000",
+                    "probe_public_ip": "203.0.113.10",
                     "protocol_version": 1,
                 }
-            ),
+            )
         )
 
         # Wait until the client replies with a result.
@@ -176,6 +178,7 @@ async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> Non
             7,
             "vless://x@example.com:443",
             "https://speed.example.com/__down?bytes=100000000",
+            "203.0.113.10",
         )
     ]
     fake = sockets[-1]
@@ -200,6 +203,7 @@ async def test_client_uses_destination_url_when_present(fake_connect: Any) -> No
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         handler_calls.append(destination_url)
         return 1.0, None
@@ -220,7 +224,7 @@ async def test_client_uses_destination_url_when_present(fake_connect: Any) -> No
                     "link": "vless://x@example.com:443",
                     "destination_url": "https://override.example.test/__down",
                 }
-            ),
+            )
         )
         for _ in range(50):
             if len(sockets[-1].sent) >= 2:
@@ -243,6 +247,7 @@ async def test_client_falls_back_when_destination_url_absent(fake_connect: Any) 
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         handler_calls.append(destination_url)
         return 1.0, None
@@ -262,7 +267,7 @@ async def test_client_falls_back_when_destination_url_absent(fake_connect: Any) 
                     "task_id": 4,
                     "link": "vless://x@example.com:443",
                 }
-            ),
+            )
         )
         for _ in range(50):
             if len(sockets[-1].sent) >= 2:
@@ -283,6 +288,7 @@ async def test_client_reports_netif_unavailable_error(fake_connect: Any) -> None
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         return None, "netif_unavailable"
 
@@ -325,6 +331,7 @@ async def test_client_ignores_unknown_message_types(fake_connect: Any) -> None:
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         raise AssertionError("handler should not be called")
 
@@ -360,6 +367,7 @@ async def test_client_handler_exception_reports_handler_error(fake_connect: Any)
         task_id: int,
         link: str,
         destination_url: str | None,
+        probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         raise RuntimeError("boom")
 

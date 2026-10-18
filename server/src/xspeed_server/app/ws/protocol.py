@@ -43,6 +43,18 @@ class TaskAssignedMessage(BaseModel):
         ),
     )
     protocol_version: int = Field(default=PROTOCOL_VERSION, ge=1)
+    probe_public_ip: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Public IP address the server sees for this probe, refreshed on "
+            "every ``online`` message. When set the probe must refuse to "
+            "test a destination that resolves to the same IP (DAT-459): "
+            "the only result would be tautological and it consumes the "
+            "operator's tunnel for nothing. ``None`` means the probe has "
+            "never connected (no ban check is performed)."
+        ),
+    )
 
 
 class OnlineMessage(BaseModel):

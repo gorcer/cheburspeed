@@ -101,40 +101,51 @@ async def handle_online_message(
 ) -> None:
     """Persist probe metadata from an ``online`` message.
 
-    Aliases and the region reported by the probe are authoritative
-    for the lifetime of the WebSocket session; we always overwrite
-    whatever was stored at probe registration time so that a probe
-    moved to a different region updates the map view on the
-    frontend without manual admin work.
-
-    ``version`` and ``netif`` are not in the ``probes`` schema yet;
-    they're logged for diagnostics only.
+    The probe's ``alias`` and last-seen timestamp are still authoritative
+    — they only describe the operator-visible identity of the box. The
+    ``region_code`` field is now treated as **advisory only**: the server
+    compares the announced code to the registered region's code and
+    logs a warning when they disagree, but the probe's region can only
+    be reassigned by an admin through the REST API. This closes the
+    spoof vector where a probe could claim to live in any region just
+    to bypass ``probe_tokens`` whitelists.
     """
-    region_id = probe["region_id"]
-    if msg.region_code:
-        region_row = await conn.fetchrow(
-            "SELECT id FROM regions WHERE code = $1",
-            msg.region_code,
+    announced_region_code = (msg.region_code or "").strip()
+    if announced_region_code:
+        registered = await conn.fetchrow(
+            """
+            SELECT r.code AS registered_code
+            FROM probes p JOIN regions r ON r.id = p.region_id
+            WHERE p.id = $1
+            """,
+            probe["id"],
         )
-        if region_row is not None:
-            region_id = int(region_row["id"])
+        if registered is not None:
+            registered_code = str(registered["registered_code"])
+            if announced_region_code != registered_code:
+                logger.warning(
+                    "probe %s claimed region_code=%r but is registered to %r; "
+                    "ignoring and keeping current region_id=%s. "
+                    "Update region through /api/v1/admin/probes if relocation is intentional.",
+                    probe["id"],
+                    announced_region_code,
+                    registered_code,
+                    probe["region_id"],
+                )
     await conn.execute(
         """
         UPDATE probes
         SET alias = $1,
-            region_id = $2,
-            ip = COALESCE($3, ip),
+            ip = COALESCE($2, ip),
             last_seen_at = now()
-        WHERE id = $4
+        WHERE id = $3
         """,
         msg.alias,
-        region_id,
         client_ip,
         probe["id"],
     )
-    probe["region_id"] = region_id
     logger.info(
-        "probe %s announced (alias=%r, region=%r, version=%r, netif=%r)",
+        "probe %s announced (alias=%r, region_code=%r, version=%r, netif=%r)",
         probe["id"],
         msg.alias,
         msg.region_code,
@@ -195,18 +206,37 @@ def register_websocket_route(app: Any) -> None:
     app.add_api_websocket_route("/ws", endpoint)
 
     async def public_endpoint(websocket: WebSocket) -> None:
-        await websocket.accept()
+        """Accept unauthenticated browser clients and forward server events.
+
+        Defensive caps:
+        * per-IP connection count (handled by :meth:`Hub.connect_public`);
+        * per-IP inbound payload rate (handled by
+          :meth:`Hub.allow_public_payload`) so an idle visitor cannot pin
+          the event loop by spamming messages;
+        * 64 KB frame cap matching the probe client default.
+        """
+        client_ip = websocket.client.host if websocket.client else None
         hub: Hub = websocket.app.state.hub
-        await hub.connect_public(websocket)
+        accepted = await hub.connect_public(websocket, client_ip=client_ip)
+        if not accepted:
+            await websocket.close(code=1013)  # "try again later"
+            return
+        await websocket.accept()
         try:
             while True:
-                message = await websocket.receive()
+                try:
+                    if not hub.allow_public_payload(client_ip):
+                        await websocket.close(code=1008)  # policy violation
+                        return
+                    message = await websocket.receive()
+                except WebSocketDisconnect:
+                    break
                 if message["type"] == "websocket.disconnect":
                     break
         except WebSocketDisconnect:
             pass
         finally:
-            await hub.disconnect_public(websocket)
+            await hub.disconnect_public(websocket, client_ip=client_ip)
 
     app.add_api_websocket_route("/ws/public", public_endpoint)
 

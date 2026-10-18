@@ -12,6 +12,7 @@ on-disk configs we wrote for each task.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import logging
 import os
@@ -28,6 +29,21 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 logger = logging.getLogger(__name__)
+
+_ORPHAN_CONFIG_GLOBS = ("xray-*.json", "xray-*.log")
+
+
+def _purge_orphan_configs(config_dir: Path) -> None:
+    """Best-effort cleanup of configs left behind by SIGKILL'd xray runs."""
+    try:
+        for pattern in _ORPHAN_CONFIG_GLOBS:
+            for path in config_dir.glob(pattern):
+                try:
+                    path.unlink()
+                except OSError:
+                    logger.debug("failed to remove orphan config %s", path)
+    except OSError:
+        logger.debug("failed to enumerate orphan configs in %s", config_dir)
 
 
 def _reap_xray(
@@ -307,6 +323,14 @@ class XrayManager:
         ready_timeout: float = 10.0,
         poll_interval: float = 0.1,
     ) -> None:
+        # Tighten the umask to 0o077 so the on-disk vless config and
+        # stderr log are created with owner-only permissions (DAT-459,
+        # item d). The change is local to this process so other
+        # components on the host are unaffected.
+        try:
+            os.umask(0o077)
+        except OSError:
+            logger.debug("could not tighten umask for xray config files")
         self._socks_host = socks_host
         self._socks_port = socks_port
         self._config_dir = Path(config_dir)
@@ -317,6 +341,9 @@ class XrayManager:
         self._configs: dict[int, Path] = {}
         self._stderr_logs: dict[int, Path] = {}
         self._stderr_files: dict[int, Any] = {}
+        # Cleanup hook for SIGKILL scenarios where the process is
+        # killed before terminate() can remove the on-disk artifacts.
+        atexit.register(_purge_orphan_configs, self._config_dir)
 
     @property
     def socks_url(self) -> str:
@@ -337,9 +364,18 @@ class XrayManager:
         )
         config_path = self._config_dir / f"xray-{task_id}.json"
         write_config(config, config_path)
+        try:
+            os.chmod(config_path, 0o600)
+        except OSError:
+            logger.debug("could not chmod 0600 on %s", config_path)
         stderr_path = self._config_dir / f"xray-{task_id}.log"
         stderr_path.unlink(missing_ok=True)
-        stderr_file = stderr_path.open("w", encoding="utf-8")
+        stderr_fd = os.open(
+            str(stderr_path),
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o600,
+        )
+        stderr_file = os.fdopen(stderr_fd, "w", encoding="utf-8")
         cmd = [self._xray_binary, "run", "-c", str(config_path)]
         logger.info(
             "starting xray for task %s: %s",

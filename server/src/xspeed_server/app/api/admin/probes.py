@@ -5,11 +5,18 @@ without having to talk SQL directly. Every route is guarded by
 :func:`xspeed_server.app.core.dependencies.get_admin_user` so the
 ``Authorization: Bearer <jwt>`` check is the only entry barrier.
 
-* ``GET  /api/v1/admin/probes`` — paginated list, newest first.
-* ``POST /api/v1/admin/probes`` — create a probe; the auth token is
-  generated server-side and returned in the response so the operator
-  can hand it to the probe container.
-* ``PUT  /api/v1/admin/probes/{id}`` — update alias/region/ip/is_public.
+The ``token`` column is treated as a write-only secret: list/detail
+endpoints return only a short preview (``token_slice``); the full token
+is exposed exactly once through ``POST`` (the create response) and the
+``rotate-token`` action. This closes the screenshot/log-leak vector
+described in the DAT-459 audit.
+
+* ``GET    /api/v1/admin/probes`` — paginated list, newest first.
+* ``POST   /api/v1/admin/probes`` — create a probe; plaintext token
+  returned in the response (one-time).
+* ``PUT    /api/v1/admin/probes/{id}`` — patch alias/region/is_public.
+* ``POST   /api/v1/admin/probes/{id}/rotate-token`` — issue a new
+  random token and return it once.
 * ``DELETE /api/v1/admin/probes/{id}`` — drop a probe; ``404`` when
   the id is unknown, ``409`` when the probe still owns a
   ``task_results`` row (so the archive invariant survives).
@@ -33,12 +40,31 @@ router = APIRouter(
     dependencies=[Depends(get_admin_user)],
 )
 
-__all__ = ["router", "ProbeOut", "ProbeList", "ProbeCreate", "ProbeUpdate"]
+__all__ = [
+    "router",
+    "ProbeOut",
+    "ProbeList",
+    "ProbeCreate",
+    "ProbeUpdate",
+    "ProbeCreated",
+    "ProbeRotated",
+]
+
+TOKEN_SLICE_CHARS: int = 12
 
 
 def _generate_token() -> str:
     """Return a 32-byte URL-safe random token for a new probe."""
     return secrets.token_urlsafe(32)
+
+
+def _token_slice(token: str) -> str:
+    """Return a non-secret preview of ``token``."""
+    if not token:
+        return ""
+    if len(token) <= TOKEN_SLICE_CHARS:
+        return token
+    return f"{token[:TOKEN_SLICE_CHARS]}\u2026"
 
 
 class ProbeCreate(BaseModel):
@@ -70,7 +96,6 @@ class ProbeUpdate(BaseModel):
     alias: str | None = Field(default=None, max_length=255)
     region_id: int | None = Field(default=None, ge=1)
     is_public: bool | None = Field(default=None)
-    token: str | None = Field(default=None, min_length=8, max_length=128)
 
     @field_validator("alias")
     @classmethod
@@ -81,11 +106,15 @@ class ProbeUpdate(BaseModel):
 
 
 class ProbeOut(BaseModel):
-    """One row in the admin probes list / detail view."""
+    """Probe payload returned by list/detail/update.
+
+    Plaintext ``token`` is **never** included here — only a short
+    preview for visual confirmation in the admin UI.
+    """
 
     id: int
     alias: str
-    token: str
+    token_slice: str
     region_id: int
     region_code: str
     region_title: str
@@ -93,6 +122,36 @@ class ProbeOut(BaseModel):
     is_public: bool
     last_seen_at: datetime | None
     created_at: datetime
+
+
+class ProbeCreated(BaseModel):
+    """One-time response returned by ``POST /api/v1/admin/probes``.
+
+    Includes the plaintext token (and the slice preview for the
+    admin table); the operator must copy it immediately because
+    subsequent reads will only expose the slice.
+    """
+
+    id: int
+    alias: str
+    token: str
+    token_slice: str
+    region_id: int
+    region_code: str
+    region_title: str
+    ip: str | None
+    is_public: bool
+    last_seen_at: datetime | None
+    created_at: datetime
+
+
+class ProbeRotated(BaseModel):
+    """One-time response returned by ``POST /admin/probes/{id}/rotate-token``."""
+
+    id: int
+    token: str
+    token_slice: str
+    rotated_at: datetime
 
 
 class ProbeList(BaseModel):
@@ -105,11 +164,12 @@ class ProbeList(BaseModel):
 
 
 def _row_to_payload(row: Any) -> dict[str, Any]:
-    """Translate an asyncpg record into the JSON shape the admin panel wants."""
+    """Translate an asyncpg record into the safe response shape."""
+    token = str(row["token"])
     return {
         "id": int(row["id"]),
         "alias": str(row["alias"] or ""),
-        "token": str(row["token"]),
+        "token_slice": _token_slice(token),
         "region_id": int(row["region_id"]),
         "region_code": str(row["region_code"]),
         "region_title": str(row["region_title"]),
@@ -160,12 +220,17 @@ async def list_probes(
 
 @router.post(
     "",
-    response_model=ProbeOut,
+    response_model=ProbeCreated,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new probe (admin only).",
 )
-async def create_probe(payload: ProbeCreate, pool: PoolDep) -> ProbeOut:
-    """Insert a probe and return it. Token is auto-generated when missing."""
+async def create_probe(payload: ProbeCreate, pool: PoolDep) -> ProbeCreated:
+    """Insert a probe and return the plaintext ``token`` *once*.
+
+    The plaintext token is only visible in this response. The list /
+    detail / update endpoints never return it; use the
+    ``rotate-token`` action to obtain a new one.
+    """
     token = payload.token or _generate_token()
     async with pool.acquire() as conn:
         region_row = await conn.fetchrow(
@@ -193,7 +258,20 @@ async def create_probe(payload: ProbeCreate, pool: PoolDep) -> ProbeOut:
     if row is None:  # pragma: no cover - RETURNING is guaranteed by Postgres
         raise HTTPException(status_code=500, detail="Failed to create probe")
     probe_id = int(row["id"])
-    return await _fetch_probe(pool, probe_id)
+    record = await _fetch_probe_record(pool, probe_id)
+    return ProbeCreated(
+        id=record["id"],
+        alias=record["alias"],
+        token=token,
+        token_slice=_token_slice(token),
+        region_id=record["region_id"],
+        region_code=record["region_code"],
+        region_title=record["region_title"],
+        ip=record["ip"],
+        is_public=record["is_public"],
+        last_seen_at=record["last_seen_at"],
+        created_at=record["created_at"],
+    )
 
 
 @router.put(
@@ -206,7 +284,12 @@ async def update_probe(
     pool: PoolDep,
     probe_id: Annotated[int, Path(ge=1)],
 ) -> ProbeOut:
-    """Patch alias/region/ip/is_public/token; 404 when the id is unknown."""
+    """Patch alias/region/is_public; 404 when the id is unknown.
+
+    Note: the operator can no longer set the token via PUT. Token
+    rotation goes through the dedicated ``rotate-token`` action so the
+    new value is exposed exactly once.
+    """
     updates: dict[str, Any] = {}
     if payload.alias is not None:
         updates["alias"] = payload.alias
@@ -214,8 +297,6 @@ async def update_probe(
         updates["region_id"] = payload.region_id
     if payload.is_public is not None:
         updates["is_public"] = payload.is_public
-    if payload.token is not None:
-        updates["token"] = payload.token
 
     if not updates:
         return await _fetch_probe(pool, probe_id)
@@ -239,15 +320,48 @@ async def update_probe(
             )
             if region_row is None:
                 raise HTTPException(status_code=404, detail="Region not found")
-        try:
-            row = await conn.fetchrow(update_sql, *values)
-        except Exception as exc:  # noqa: BLE001 - translate to HTTP
-            if _is_unique_violation(exc):
-                raise HTTPException(status_code=409, detail="Probe token already exists") from exc
-            raise
+        row = await conn.fetchrow(update_sql, *values)
     if row is None:
         raise HTTPException(status_code=404, detail="Probe not found")
     return await _fetch_probe(pool, probe_id)
+
+
+@router.post(
+    "/{probe_id}/rotate-token",
+    response_model=ProbeRotated,
+    summary="Rotate a probe token (admin only).",
+)
+async def rotate_probe_token(
+    pool: PoolDep,
+    probe_id: Annotated[int, Path(ge=1)],
+) -> ProbeRotated:
+    """Issue a new random token and return the plaintext value once.
+
+    The previous token becomes invalid the moment the request returns.
+    WebSocket sessions that were using the old token are not
+    automatically disconnected but will fail on the next reconnect.
+    """
+    new_token = _generate_token()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE probes
+            SET token = $1
+            WHERE id = $2
+            RETURNING id, token
+            """,
+            new_token,
+            probe_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Probe not found")
+    rotated_at = await _now(pool)
+    return ProbeRotated(
+        id=int(row["id"]),
+        token=str(row["token"]),
+        token_slice=_token_slice(str(row["token"])),
+        rotated_at=rotated_at,
+    )
 
 
 @router.delete(
@@ -280,6 +394,12 @@ async def delete_probe(
 
 async def _fetch_probe(pool: Any, probe_id: int) -> ProbeOut:
     """Fetch a single probe with its region attached; 404 when missing."""
+    record = await _fetch_probe_record(pool, probe_id)
+    return ProbeOut.model_validate(record)
+
+
+async def _fetch_probe_record(pool: Any, probe_id: int) -> dict[str, Any]:
+    """Return the safe payload (token replaced by ``token_slice``)."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             _SELECT_PROBES + " WHERE p.id = $1",
@@ -287,7 +407,16 @@ async def _fetch_probe(pool: Any, probe_id: int) -> ProbeOut:
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Probe not found")
-    return ProbeOut.model_validate(_row_to_payload(row))
+    return _row_to_payload(row)
+
+
+async def _now(pool: Any) -> datetime:
+    """Return the database ``now()`` so client and DB agree on the timestamp."""
+    async with pool.acquire() as conn:
+        value = await conn.fetchval("SELECT now()")
+    if value is None:  # pragma: no cover - now() is guaranteed non-null
+        return datetime.now(tz=datetime.UTC)
+    return value
 
 
 def _is_unique_violation(exc: BaseException) -> bool:
