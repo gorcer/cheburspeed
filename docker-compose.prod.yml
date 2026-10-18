@@ -162,10 +162,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-    security_opt:
-      - no-new-privileges:true
+    # nginx needs writable work directories at startup even with the
+    # read-only rootfs; drop ALL but the minimum it actually needs
+    # (NET_BIND_SERVICE, CHOWN, DAC_OVERRIDE for the work tree).
     cap_drop:
       - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
     logging:
       driver: json-file
       options:
