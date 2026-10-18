@@ -198,6 +198,7 @@ def build_xray_config(
     socks_host: str = "127.0.0.1",
     socks_port: int = 1080,
     send_through: str | None = None,
+    network_interface: str | None = None,
 ) -> dict[str, Any]:
     """Return the xray JSON config that dials ``endpoint`` via SOCKS5.
 
@@ -207,11 +208,11 @@ def build_xray_config(
     HTTP client then dials through.
 
     When ``send_through`` is provided, it is forwarded as the
-    ``sendThrough`` field on the vless outbound so xray binds the
-    outbound socket to the named interface's IPv4. This is how the
-    probe actually pins ``NETWORK_INTERFACE``: xray ignores interface
-    names, so we resolve the IPv4 (see
-    :func:`xspeed_probe.netif.resolve_interface_ip`) and pass it here.
+    ``sendThrough`` field on the vless outbound. When
+    ``network_interface`` is provided, it is forwarded to xray's
+    ``sockopt.interface``. Together they bind the outbound socket to
+    the configured NIC and its current IPv4, so Linux cannot send it
+    through a higher-priority default route on another interface.
     An empty string or ``None`` produces the previous default
     behaviour, where xray uses the kernel's default route.
 
@@ -292,6 +293,8 @@ def build_xray_config(
     }
     if send_through:
         vless_outbound["sendThrough"] = send_through
+    if network_interface:
+        stream_settings["sockopt"] = {"interface": network_interface}
     return {
         "log": {"loglevel": "warning"},
         "inbounds": [
@@ -360,15 +363,21 @@ class XrayManager:
     def socks_url(self) -> str:
         return f"socks5://{self._socks_host}:{self._socks_port}"
 
-    def start(self, task_id: int, link: str, *, send_through: str | None = None) -> Path:
+    def start(
+        self,
+        task_id: int,
+        link: str,
+        *,
+        send_through: str | None = None,
+        network_interface: str | None = None,
+    ) -> Path:
         """Spawn xray for ``task_id`` using the vless ``link`` from the server.
 
-        ``send_through`` is an optional IPv4 literal that pins the
-        vless outbound to a specific source IP. The probe resolves the
-        IPv4 of ``NETWORK_INTERFACE`` right before each task so a DHCP
-        lease change is picked up automatically. ``None`` falls back
-        to xray's default-route behaviour — the same as before this
-        feature was introduced.
+        ``send_through`` is an optional IPv4 literal and
+        ``network_interface`` is the corresponding Linux interface
+        name. The probe resolves the IPv4 right before each task so a
+        DHCP lease change is picked up automatically. Both ``None``
+        values preserve xray's default-route behaviour.
 
         Returns the path to the on-disk JSON config so tests can clean
         it up explicitly. Raises :class:`VlessUriError` if the link is
@@ -380,6 +389,7 @@ class XrayManager:
             socks_host=self._socks_host,
             socks_port=self._socks_port,
             send_through=send_through,
+            network_interface=network_interface,
         )
         config_path = self._config_dir / f"xray-{task_id}.json"
         write_config(config, config_path)
@@ -528,9 +538,15 @@ class XrayManager:
         link: str,
         *,
         send_through: str | None = None,
+        network_interface: str | None = None,
     ) -> Iterator[Path]:
         """Context manager that starts xray and guarantees cleanup."""
-        config_path = self.start(task_id, link, send_through=send_through)
+        config_path = self.start(
+            task_id,
+            link,
+            send_through=send_through,
+            network_interface=network_interface,
+        )
         try:
             yield config_path
         finally:

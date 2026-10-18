@@ -133,7 +133,12 @@ async def _run_task(
         )
         return None, "self_ip_forbidden"
     try:
-        xray.start(task_id, link, send_through=send_through)
+        xray.start(
+            task_id,
+            link,
+            send_through=send_through,
+            network_interface=settings.network_interface,
+        )
     except Exception as exc:  # noqa: BLE001 - surface as result error
         logger.exception("failed to start xray for task %s", task_id)
         return None, f"xray_start_failed: {exc}"

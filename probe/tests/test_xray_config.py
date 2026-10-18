@@ -123,3 +123,18 @@ def test_config_includes_send_through_when_set() -> None:
     config = build_xray_config(endpoint, send_through="10.189.65.201")
     outbound = config["outbounds"][0]
     assert outbound["sendThrough"] == "10.189.65.201"
+
+
+def test_config_binds_outbound_to_network_interface() -> None:
+    endpoint = VlessEndpoint.from_uri(
+        "vless://11111111-2222-3333-4444-555555555555@example.com:443",
+    )
+    config = build_xray_config(
+        endpoint,
+        send_through="10.189.65.201",
+        network_interface="usbphone0",
+    )
+    outbound = config["outbounds"][0]
+
+    assert outbound["sendThrough"] == "10.189.65.201"
+    assert outbound["streamSettings"]["sockopt"] == {"interface": "usbphone0"}
