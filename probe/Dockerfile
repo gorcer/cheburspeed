@@ -9,7 +9,14 @@
 # Pinned to a known release tag instead of :latest (DAT-459, item o)
 # so unexpected upstream changes / CVE patches cannot break production
 # builds without an explicit bump.
-ARG XRAY_VERSION=1.8.4
+#
+# 26.10.17 (Oct 2026) is the minimum that supports the ``xhttp``
+# transport used by the vless URIs handed out by the df3 upstream
+# (DAT-461). Older 1.8.x builds reject it with
+# ``unknown transport protocol: xhttp`` — the probe then writes a
+# ``xray_start_failed`` result and the operator cannot tell whether
+# the failure came from the link or the egress.
+ARG XRAY_VERSION=26.10.17
 FROM --platform=$BUILDPLATFORM teddysun/xray:${XRAY_VERSION} AS xray
 
 # Stage 2: Python probe -------------------------------------------------
