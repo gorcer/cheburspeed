@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# XSpeed update script.
+# CheburSpeed update script.
 #
 #   1. git pull --ff-only origin dev (with auto-stash of local edits)
 #   2. docker compose up -d --build  (server, frontend, nginx)

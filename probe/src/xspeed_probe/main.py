@@ -1,4 +1,4 @@
-"""XSpeed probe entry point.
+"""CheburSpeed probe entry point.
 
 The probe runs an asyncio event loop that wires together three
 collaborators:

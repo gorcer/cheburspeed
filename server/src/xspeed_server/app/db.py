@@ -1,4 +1,4 @@
-"""Database access layer for XSpeed.
+"""Database access layer for CheburSpeed.
 
 Exposes a single :class:`Database` container that owns the
 :class:`asyncpg.Pool` and the SQLAlchemy :class:`AsyncEngine`. The

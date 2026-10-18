@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for XSpeed server."""
+"""SQLAlchemy ORM models for CheburSpeed server."""
 
 from xspeed_server.models.admin import Admin
 from xspeed_server.models.base import Base

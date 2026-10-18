@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "XSpeed",
+    "title": "CheburSpeed",
     "subtitle": "Сервис мониторинга скорости VLESS-соединений"
   },
   "nav": {
@@ -76,8 +76,8 @@
     "retryIn": "повтор через {{seconds}}с"
   },
   "docs": {
-    "title": "Документация XSpeed",
-    "intro": "XSpeed — это сервис мониторинга скорости VLESS-соединений. Проба устанавливается на узле и через WebSocket получает задания, прогоняет speedtest через xray и возвращает результат на сервер.",
+    "title": "Документация CheburSpeed",
+    "intro": "CheburSpeed — это сервис мониторинга скорости VLESS-соединений. Проба устанавливается на узле и через WebSocket получает задания, прогоняет speedtest через xray и возвращает результат на сервер.",
     "apiTitle": "HTTP API",
     "adminTitle": "API админки",
     "adminIntro": "Все маршруты ниже защищены JWT. Получите токен через POST /api/v1/admin/login и передавайте его в заголовке Authorization: Bearer <token>.",

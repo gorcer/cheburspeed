@@ -1,4 +1,4 @@
-# XSpeed
+# CheburSpeed
 
 Сервис мониторинга скорости работы vless соединений.
 
@@ -159,11 +159,22 @@ git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0
 
 ## Добавление пробы
 
-После того как в GHCR появился образ `cheburspeed-probe`, на каждой
-новой машине:
+Проба — это контейнер, который запускается на узле рядом с
+xray-инстансом, получает задания по WebSocket и возвращает
+измеренную скорость на сервер. Существует два сценария установки:
+через готовый образ из GHCR (production) или из исходников (dev).
+
+### Быстрая установка с GHCR
+
+После релиза образ `ghcr.io/gorcer/cheburspeed-probe` уже
+содержит и xray, и клиент. Для production-узлов используйте этот
+путь — multi-arch образ (linux/amd64, linux/arm64) собирается
+через buildx в `.github/workflows/release.yml`.
 
 ```sh
-docker run -d --name xspeed-probe \
+docker run -d \
+  --name xspeed-probe \
+  --network=host \
   --restart unless-stopped \
   -e SERVER_URL=wss://xspeed.example.com/ws \
   -e PROBE_TOKEN=<токен из таблицы probes> \
@@ -172,19 +183,63 @@ docker run -d --name xspeed-probe \
   ghcr.io/gorcer/cheburspeed-probe:latest
 ```
 
-Токен берётся из колонки `probes.token` (создаётся через
-админку `/admin/probes`). Проба автоматически переподключается
-при обрыве связи (exponential backoff). Без заданного
-`NETWORK_INTERFACE` проба использует любой доступный интерфейс;
-если переменная задана, но интерфейс отсутствует, проба логирует
-warning и пропускает задание со статусом `error="netif_unavailable"`.
+`--network=host` нужен, чтобы проба могла слушать xray на
+`127.0.0.1:1080` без проброса портов. Если это недопустимо
+по соображениям безопасности, прокиньте порт явно:
+
+```sh
+docker run -d --name xspeed-probe \
+  --restart unless-stopped \
+  -p 127.0.0.1:1080:1080 \
+  -e SERVER_URL=wss://xspeed.example.com/ws \
+  -e PROBE_TOKEN=<токен из таблицы probes> \
+  -e PROBE_ALIAS=msk-router-1 \
+  -e REGION_CODE=msk \
+  ghcr.io/gorcer/cheburspeed-probe:latest
+```
+
+Теги:
+
+- `:latest` — последний push в `master`/`dev`, обновляется при
+  каждом коммите. Не использовать в production.
+- `:X.Y.Z` — релизные теги, ставятся при пуше тега `vX.Y.Z`
+  (см. `.github/workflows/release.yml`). Рекомендуется
+  фиксировать релизный тег в `.env.prod` через `XSPEED_VERSION`.
+
+Архитектуры: образ собирается сразу под `linux/amd64` и
+`linux/arm64`. Проверить наличие обеих платформ можно так:
+
+```sh
+docker buildx imagetools inspect ghcr.io/gorcer/cheburspeed-probe:latest
+```
+
+### Получение токена пробы
+
+Проба авторизуется на сервере по токену, который заранее
+регистрируется в админке. Без токена контейнер запустится, но
+WebSocket-хэндшейк будет отклонён с HTTP 403.
+
+1. Зайти в `/admin/login`, ввести email/пароль администратора
+   (создаётся через `make admin-create email=… password=…`).
+2. Перейти в `/admin/probes` и нажать «Создать пробу».
+3. Заполнить поля `alias` (человекочитаемое имя, например
+   `msk-router-1`) и `region` (код региона из справочника,
+   например `msk`). Поле `token` можно оставить пустым — сервер
+   сгенерирует его автоматически.
+4. Скопировать полученный `token` и подставить его в `.env`
+   (`PROBE_TOKEN=…`) или в `-e PROBE_TOKEN=…` при `docker run`.
+
+Тот же `alias`/`region_code` сервер использует для отображения
+пробы на карте (`/admin/dashboard`, главная страница). Если
+планируется больше одной пробы в одном регионе — у каждой должен
+быть уникальный `alias`.
 
 ### Локальное управление пробой (`probe.sh`)
 
-В корне репозитория лежит `probe.sh` — обёртка над `docker run` /
-`docker start|stop|rm` для текущего окружения. Конфигурация берётся
-из `.env` (`PROBE_TOKEN`, `PROBE_REGION`, `PROBE_ALIAS`,
-`PROBE_SERVER_URL`, `PROBE_SPEEDTEST_URL`).
+В корне репозитория лежит `probe.sh` — обёртка над
+`docker run` / `docker start|stop|rm` для текущего окружения.
+Конфигурация берётся из `.env` (`PROBE_TOKEN`, `PROBE_REGION`,
+`PROBE_ALIAS`, `PROBE_SERVER_URL`, `PROBE_SPEEDTEST_URL`).
 
 ```sh
 ./probe.sh create    # build образа (если нужно) + новый контейнер
@@ -203,6 +258,14 @@ warning и пропускает задание со статусом `error="net
 повторный запуск снимает существующий контейнер с тем же именем
 и поднимает новый.
 
+`create` поддерживает два флага:
+
+- `--no-build` — пропустить `docker build`, даже если образ
+  отсутствует локально (полезно, если образ уже подтянут из
+  GHCR через `docker pull`).
+- `--pull` — выполнить `docker pull $PROBE_IMAGE` вместо
+  локальной сборки.
+
 `status` дополнительно заходит в `/api/v1/admin/probes` и находит
 запись, чей `token` совпадает с `PROBE_TOKEN` из `.env` (если
 токен не выставлен — ищет по `alias`/`region_code`). Без
@@ -211,6 +274,35 @@ warning и пропускает задание со статусом `error="net
 
 Имя контейнера по умолчанию `xspeed-probe-${PROBE_REGION,,}`;
 переопределяется через `PROBE_CONTAINER` в `.env`.
+
+### Запуск из исходников (dev)
+
+Для отладки без контейнера можно запустить пробу прямо из
+исходников Python. Внутри `probe/` используется тот же asyncio
+event-loop, что и в Docker-образе, только вместо xray-конфига
+можно указать собственный SOCKS5 через переменные окружения.
+
+```sh
+cd probe
+cp .env.example .env
+# отредактировать .env: SERVER_URL, PROBE_TOKEN, PROBE_ALIAS, REGION_CODE
+uv sync
+uv run xspeed-probe
+```
+
+Альтернативно из корня репозитория — через Makefile:
+
+```sh
+make install-probe    # uv sync в probe/
+make probe-run        # uv run xspeed-probe
+```
+
+Проба автоматически переподключается при обрыве связи
+(exponential backoff, от 1 до 30 секунд). Без заданного
+`NETWORK_INTERFACE` проба использует любой доступный интерфейс;
+если переменная задана, но интерфейс отсутствует, проба логирует
+warning и пропускает задание со статусом
+`error="netif_unavailable"`.
 
 ## Документация API
 

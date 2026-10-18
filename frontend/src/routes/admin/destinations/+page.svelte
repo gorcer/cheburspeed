@@ -153,7 +153,7 @@
 </script>
 
 <svelte:head>
-  <title>XSpeed · {t("admin.tabs.destinations")}</title>
+  <title>CheburSpeed · {t("admin.tabs.destinations")}</title>
 </svelte:head>
 
 <div class="space-y-5">

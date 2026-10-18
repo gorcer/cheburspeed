@@ -1,11 +1,11 @@
 [project]
 name = "xspeed-server"
 version = "0.1.0"
-description = "XSpeed backend (FastAPI + PostgreSQL + WebSocket)"
+description = "CheburSpeed backend (FastAPI + PostgreSQL + WebSocket)"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-    { name = "XSpeed" },
+    { name = "CheburSpeed" },
 ]
 dependencies = [
     "fastapi>=0.115.0",

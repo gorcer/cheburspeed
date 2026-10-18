@@ -25,7 +25,7 @@
 </script>
 
 <svelte:head>
-  <title>XSpeed · {t("docs.title")}</title>
+  <title>CheburSpeed · {t("docs.title")}</title>
 </svelte:head>
 
 <article

@@ -1,4 +1,4 @@
-"""XSpeed FastAPI application package.
+"""CheburSpeed FastAPI application package.
 
 Re-exports :func:`create_app` so that ``uvicorn xspeed_server.app:create_app``
 keeps working after the factory moved into :mod:`xspeed_server.app.main`.

@@ -236,7 +236,7 @@
 </script>
 
 <svelte:head>
-  <title>XSpeed · {t("admin.tabs.probes")}</title>
+  <title>CheburSpeed · {t("admin.tabs.probes")}</title>
 </svelte:head>
 
 <div class="space-y-5">

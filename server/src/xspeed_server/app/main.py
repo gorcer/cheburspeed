@@ -90,9 +90,9 @@ def _configure_cors(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     """Build and return a fully-configured FastAPI application."""
     app = FastAPI(
-        title="XSpeed API",
+        title="CheburSpeed API",
         version="0.1.0",
-        description="HTTP API for the XSpeed vless speedtest service.",
+        description="HTTP API for the CheburSpeed vless speedtest service.",
         lifespan=lifespan,
     )
     _configure_cors(app)

@@ -1,4 +1,4 @@
-"""SQLAlchemy declarative base for XSpeed server."""
+"""SQLAlchemy declarative base for CheburSpeed server."""
 
 from __future__ import annotations
 

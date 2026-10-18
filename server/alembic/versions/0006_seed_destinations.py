@@ -1,4 +1,4 @@
-"""seed destinations: cloudflare + dataforest (XSpeed static payload)
+"""seed destinations: cloudflare + dataforest (CheburSpeed static payload)
 
 Revision ID: 0006_seed_destinations
 Revises: 0005_destinations

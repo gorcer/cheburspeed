@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "XSpeed",
+    "title": "CheburSpeed",
     "subtitle": "VLESS connection speed monitoring service"
   },
   "nav": {
@@ -76,8 +76,8 @@
     "retryIn": "retry in {{seconds}}s"
   },
   "docs": {
-    "title": "XSpeed documentation",
-    "intro": "XSpeed is a vless speedtest monitoring service. The probe is installed on a node and receives jobs over WebSocket, runs a speedtest through xray and returns the result to the server.",
+    "title": "CheburSpeed documentation",
+    "intro": "CheburSpeed is a vless speedtest monitoring service. The probe is installed on a node and receives jobs over WebSocket, runs a speedtest through xray and returns the result to the server.",
     "apiTitle": "HTTP API",
     "adminTitle": "Admin API",
     "adminIntro": "All routes below are protected by JWT. Obtain a token via POST /api/v1/admin/login and pass it in the Authorization: Bearer <token> header.",

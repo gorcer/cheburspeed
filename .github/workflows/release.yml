@@ -135,7 +135,7 @@ jobs:
           fi
 
           {
-            echo "## XSpeed v${VERSION}"
+            echo "## CheburSpeed v${VERSION}"
             echo
             echo "### Docker images"
             echo

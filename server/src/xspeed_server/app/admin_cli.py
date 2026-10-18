@@ -95,7 +95,7 @@ async def _amain(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m xspeed_server.app.admin_cli",
-        description="Manage XSpeed admin users.",
+        description="Manage CheburSpeed admin users.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

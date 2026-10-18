@@ -1,4 +1,4 @@
-"""XSpeed FastAPI application entry point."""
+"""CheburSpeed FastAPI application entry point."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def run() -> None:
-    """Run the XSpeed server with uvicorn."""
+    """Run the CheburSpeed server with uvicorn."""
     uvicorn.run(
         "xspeed_server.app:create_app",
         host="0.0.0.0",

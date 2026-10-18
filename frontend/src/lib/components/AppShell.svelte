@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Globe, Languages, ShieldCheck } from '@lucide/svelte';
+  import { Github, Globe, Languages, ShieldCheck } from '@lucide/svelte';
   import { page } from '$app/state';
 
   import { locale } from '$lib/stores/locale.svelte';
@@ -11,7 +11,6 @@
   const navItems = $derived([
     { href: '/', label: t('nav.home') },
     { href: '/docs', label: t('nav.docs') },
-    { href: '/admin', label: t('nav.admin') },
   ]);
 </script>
 
@@ -43,6 +42,15 @@
       </nav>
       <div class="flex items-center gap-3">
         <StatusDot />
+        <a
+          href="https://github.com/gorcer/cheburspeed"
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label="GitHub"
+          class="inline-flex items-center justify-center rounded-pill border border-surface-300 p-2 text-surface-content/70 transition hover:bg-surface-300/30 hover:text-surface-content"
+        >
+          <Github size={16} aria-hidden="true" />
+        </a>
         <button
           type="button"
           onclick={() => locale.toggle()}
@@ -65,6 +73,6 @@
   </main>
 
   <footer class="mx-auto max-w-6xl px-4 py-6 text-center text-surface-content/40">
-    <span class="text-xs">© XSpeed</span>
+    <span class="text-xs">© CheburSpeed</span>
   </footer>
 </div>

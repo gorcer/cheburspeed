@@ -1,6 +1,6 @@
 # Frontend
 
-SvelteKit 2 + Svelte 5 (runes) + Tailwind 4 UI для XSpeed.
+SvelteKit 2 + Svelte 5 (runes) + Tailwind 4 UI для CheburSpeed.
 
 Public URL: http://localhost:5173 (dev) / http://localhost:3000 (prod via nginx).
 

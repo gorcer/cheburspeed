@@ -24,7 +24,7 @@ class ProbeSettings(BaseSettings):
     )
     server_url: str = Field(
         default="ws://server:8080/ws",
-        description="WebSocket endpoint exposed by the XSpeed server.",
+        description="WebSocket endpoint exposed by the CheburSpeed server.",
     )
     probe_alias: str = Field(
         default="probe",

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-    { name = "XSpeed" },
+    { name = "CheburSpeed" },
 ]
 
 dependencies = []

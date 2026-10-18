@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# probe.sh — manage the XSpeed probe container in this folder.
+# probe.sh — manage the CheburSpeed probe container in this folder.
 #
 #   ./probe.sh create        build image (if missing) and start a fresh container
 #   ./probe.sh start         start an already-existing, stopped container

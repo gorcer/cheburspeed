@@ -6,7 +6,7 @@
 </script>
 
 <svelte:head>
-  <title>XSpeed — карта скоростей VLESS</title>
+  <title>CheburSpeed — карта скоростей VLESS</title>
 </svelte:head>
 
 <div class="space-y-6">

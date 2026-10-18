@@ -1,4 +1,4 @@
-"""Alembic environment for XSpeed server."""
+"""Alembic environment for CheburSpeed server."""
 
 from __future__ import annotations
 

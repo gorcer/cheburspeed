@@ -76,7 +76,7 @@
 </script>
 
 <svelte:head>
-  <title>XSpeed · {t("admin.tabs.dashboard")}</title>
+  <title>CheburSpeed · {t("admin.tabs.dashboard")}</title>
 </svelte:head>
 
 <div class="space-y-5">

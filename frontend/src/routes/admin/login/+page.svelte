@@ -44,7 +44,7 @@
 </script>
 
 <svelte:head>
-  <title>XSpeed · {t("admin.loginTitle")}</title>
+  <title>CheburSpeed · {t("admin.loginTitle")}</title>
 </svelte:head>
 
 <section

@@ -1,4 +1,4 @@
-# Production stack for XSpeed — provides HTTPS via certbot, restart=always,
+# Production stack for CheburSpeed — provides HTTPS via certbot, restart=always,
 # healthchecks on every service and a long-running certbot renewer.
 #
 # Usage:

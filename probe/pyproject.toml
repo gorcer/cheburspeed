@@ -1,11 +1,11 @@
 [project]
 name = "xspeed-probe"
 version = "0.1.0"
-description = "XSpeed probe client (xray + speedtest over WebSocket)"
+description = "CheburSpeed probe client (xray + speedtest over WebSocket)"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-    { name = "XSpeed" },
+    { name = "CheburSpeed" },
 ]
 dependencies = [
     "websockets>=13.1",

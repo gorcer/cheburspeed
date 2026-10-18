@@ -2,7 +2,7 @@
   "name": "xspeed-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "XSpeed UI (SvelteKit 2 + Svelte 5)",
+  "description": "CheburSpeed UI (SvelteKit 2 + Svelte 5)",
   "type": "module",
   "scripts": {
     "dev": "vite dev",

@@ -1,4 +1,4 @@
-"""XSpeed probe package."""
+"""CheburSpeed probe package."""
 
 from __future__ import annotations
 

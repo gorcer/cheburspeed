@@ -1,4 +1,4 @@
-"""WebSocket client that talks to the XSpeed server's ``/ws`` endpoint.
+"""WebSocket client that talks to the CheburSpeed server's ``/ws`` endpoint.
 
 The probe keeps a single long-lived WebSocket connection alive and
 piggy-backs all protocol traffic on it: an ``online`` message on

@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the XSpeed server test suite.
+"""Shared pytest fixtures for the CheburSpeed server test suite.
 
 The tests run against a real PostgreSQL instance (the project standard
 for JSONB / ``percentile_cont``). The ``TEST_DATABASE_URL`` environment

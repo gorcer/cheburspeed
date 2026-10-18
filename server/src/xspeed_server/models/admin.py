@@ -11,7 +11,7 @@ from xspeed_server.models.base import Base
 
 
 class Admin(Base):
-    """Administrator account for the XSpeed admin panel."""
+    """Administrator account for the CheburSpeed admin panel."""
 
     __tablename__ = "admins"
 
