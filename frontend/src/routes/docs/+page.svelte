@@ -11,13 +11,7 @@
     { key: "urlParams" },
   ] as const;
 
-  const adminEndpoints = [
-    { key: "login" },
-    { key: "probes" },
-    { key: "destinations" },
-    { key: "tasks" },
-    { key: "stats" },
-  ] as const;
+
 
   const events = ["taskAssigned", "online", "result"] as const;
 
@@ -60,29 +54,7 @@
     </ul>
   </section>
 
-  <section class="space-y-3">
-    <h2
-      class="text-sm font-semibold uppercase tracking-wide text-surface-content/60"
-    >
-      {t("docs.adminTitle")}
-    </h2>
-    <p class="text-sm text-surface-content/70">{t("docs.adminIntro")}</p>
-    <ul class="space-y-2 text-sm">
-      {#each adminEndpoints as endpoint (endpoint.key)}
-        <li
-          class="rounded-card border border-surface-300 bg-surface-100/40 p-3"
-        >
-          <code class="font-mono text-xs text-primary">
-            {t(`docs.adminEndpoints.${endpoint.key}.title`)}
-          </code>
-          <p class="mt-1 text-surface-content/70">
-            {t(`docs.adminEndpoints.${endpoint.key}.description`)}
-          </p>
-        </li>
-      {/each}
-    </ul>
-    <p class="text-xs text-surface-content/60">{t("docs.adminAuth")}</p>
-  </section>
+
 
   <section class="space-y-3">
     <h2

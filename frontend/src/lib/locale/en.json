@@ -79,31 +79,7 @@
     "title": "CheburSpeed documentation",
     "intro": "CheburSpeed is a vless speedtest monitoring service. The probe is installed on a node and receives jobs over WebSocket, runs a speedtest through xray and returns the result to the server.",
     "apiTitle": "HTTP API",
-    "adminTitle": "Admin API",
-    "adminIntro": "All routes below are protected by JWT. Obtain a token via POST /api/v1/admin/login and pass it in the Authorization: Bearer <token> header.",
-    "adminAuth": "Without a token or with an expired token the server returns 401.",
-    "adminEndpoints": {
-      "login": {
-        "title": "POST /api/v1/admin/login",
-        "description": "Exchange email/password for a JWT. Body: { email, password }."
-      },
-      "probes": {
-        "title": "GET/POST/PUT/DELETE /api/v1/admin/probes",
-        "description": "Probe CRUD. The probe token can be supplied explicitly or auto-generated."
-      },
-      "destinations": {
-        "title": "GET/POST/PUT/DELETE /api/v1/admin/destinations",
-        "description": "CRUD over speedtest target URLs. The catalogue drives the homepage dropdown and is referenced by every task."
-      },
-      "tasks": {
-        "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
-        "description": "List tasks with filters and detail with per-probe results."
-      },
-      "stats": {
-        "title": "GET /api/v1/admin/stats",
-        "description": "Dashboard aggregate: per-region medians, speed histogram, archive lag."
-      }
-    },
+
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",

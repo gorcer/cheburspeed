@@ -79,31 +79,7 @@
     "title": "Документация CheburSpeed",
     "intro": "CheburSpeed — это сервис мониторинга скорости VLESS-соединений. Проба устанавливается на узле и через WebSocket получает задания, прогоняет speedtest через xray и возвращает результат на сервер.",
     "apiTitle": "HTTP API",
-    "adminTitle": "API админки",
-    "adminIntro": "Все маршруты ниже защищены JWT. Получите токен через POST /api/v1/admin/login и передавайте его в заголовке Authorization: Bearer <token>.",
-    "adminAuth": "Без токена или с просроченным токеном сервер возвращает 401.",
-    "adminEndpoints": {
-      "login": {
-        "title": "POST /api/v1/admin/login",
-        "description": "Обмен email/пароль на JWT. Тело: { email, password }."
-      },
-      "probes": {
-        "title": "GET/POST/PUT/DELETE /api/v1/admin/probes",
-        "description": "CRUD проб. Токен пробы можно передать явно или сгенерировать автоматически."
-      },
-      "destinations": {
-        "title": "GET/POST/PUT/DELETE /api/v1/admin/destinations",
-        "description": "CRUD адресов speedtest. Справочник управляет дропдауном на главной и хранит ссылку для каждого задания."
-      },
-      "tasks": {
-        "title": "GET /api/v1/admin/tasks?status=&from=&to=&region=",
-        "description": "Список заданий с фильтрами и детали с результатами."
-      },
-      "stats": {
-        "title": "GET /api/v1/admin/stats",
-        "description": "Сводка для дашборда: медиана по регионам, гистограмма скоростей, archive_lag."
-      }
-    },
+
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
