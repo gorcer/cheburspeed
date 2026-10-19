@@ -24,9 +24,10 @@ throughput через SOCKS5-прокси.
 * `config.py` — pydantic-settings (`SERVER_URL`, `PROBE_TOKEN`,
   `NETWORK_INTERFACE?`, `SPEEDTEST_URL?`, `PROBE_ALIAS?`, `REGION_CODE?`).
 * `netif.py` — проверяет, что `NETWORK_INTERFACE` присутствует в
-  `socket.if_nameindex()`, иначе шлёт `netif_unavailable`. Дополнительно
-  резолвит IPv4 интерфейса через SIOCGIFADDR; при отсутствии адреса
-  шлёт `netif_no_ip`. xray принимает только IP-литерал в `sendThrough`.
+  `socket.if_nameindex()`, иначе молча пропускает задачу. Дополнительно
+  резолвит IPv4 интерфейса через SIOCGIFADDR; при отсутствии маршрутизируемого
+  IPv4 задача тоже пропускается без ошибки (xray принимает только IP-литерал
+  в `sendThrough`, лишних проверок в нём нет).
 * `xray.py` — парсит `vless://` URI, генерирует JSON-конфиг и
   запускает `xray-core`; ждёт открытия SOCKS-порта перед замером.
   Если проба передала IPv4 интерфейса, кладёт его в `sendThrough` —
@@ -117,6 +118,6 @@ WebSocket и завершает все xray-процессы, порождённ
 | `PROBE_TOKEN`      | да                                                          | Bearer-токен для авторизации на сервере               |
 | `PROBE_ALIAS`      | нет                                                         | Человекочитаемое имя пробы                            |
 | `REGION_CODE`      | нет                                                         | Код региона (см. `regions.code` в БД)                 |
-| `NETWORK_INTERFACE`| нет                                                         | Исходящий NIC; проба резолвит его IPv4 (через SIOCGIFADDR) и кладёт в `sendThrough`. Пусто или интерфейс отсутствует → `netif_unavailable`; есть NIC, но без IPv4 → `netif_no_ip`. |
+| `NETWORK_INTERFACE`| нет                                                         | Исходящий NIC; проба резолвит его IPv4 (через SIOCGIFADDR) и кладёт в `sendThrough`. Пусто или интерфейс отсутствует — задача пропускается без ошибки; есть NIC, но без маршрутизируемого IPv4 — задача пропускается без ошибки. В обоих случаях серверный sweeper через 5 минут вернёт задачу в очередь. |
 | `SPEEDTEST_URL`    | нет                                                         | URL для замера скорости                                |
 | `LOG_LEVEL`        | нет (`INFO`)                                               | Уровень логирования                                   |

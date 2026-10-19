@@ -59,8 +59,8 @@ def ensure_interface_available(name: str | None) -> bool:
     * When ``name`` is ``None`` or empty the check is a no-op and
       ``True`` is returned — the operator simply did not pin a NIC.
     * When ``name`` is set but missing the function logs a warning and
-      returns ``False`` so the caller can abort the task with the
-      ``netif_unavailable`` error code without crashing the process.
+      returns ``False`` so the caller can skip the task silently (by
+      returning ``(None, None)``) without crashing the process.
     """
     if not name:
         return True
@@ -127,11 +127,11 @@ def resolve_interface_ip(name: str) -> str:
     """Return the IPv4 address to bind xray's ``sendThrough`` to.
 
     ``name`` is the operator-pinned ``NETWORK_INTERFACE``. The function
-    fails loudly if the interface is missing, has no IPv4, or only has
-    a loopback / link-local address — xray rejects any of those for
-    ``sendThrough``, so the caller should mark the task as
-    ``netif_unavailable`` / ``netif_no_ip`` instead of letting xray dial
-    out through the wrong NIC.
+    raises when the interface is missing, has no IPv4, or only has a
+    loopback / link-local address — xray rejects any of those for
+    ``sendThrough``, so the caller skips the task silently (by
+    returning ``(None, None)``) instead of letting xray dial out
+    through the wrong NIC.
     """
     if not is_interface_available(name):
         available = list_interfaces()

@@ -223,6 +223,12 @@ class ProbeClient:
         except Exception as exc:  # noqa: BLE001
             logger.exception("task %s handler failed", task_id)
             error = f"handler_error: {exc}"
+        if speed_mbps is None and error is None:
+            logger.debug(
+                "task %s: handler returned (None, None); skipping result",
+                task_id,
+            )
+            return
         await self._send_result(ws, task_id, speed_mbps, error)
 
     async def _send_result(

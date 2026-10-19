@@ -106,19 +106,20 @@ async def _run_task(
     send_through: str | None = None
     if settings.network_interface:
         if not ensure_interface_available(settings.network_interface):
-            return None, "netif_unavailable"
+            return None, None
         try:
             send_through = resolve_interface_ip(settings.network_interface)
         except NetworkInterfaceUnavailableError:
-            return None, "netif_unavailable"
+            return None, None
         except InterfaceNoIpError as exc:
             logger.warning(
-                "task %s: NETWORK_INTERFACE=%r has no routable IPv4 (%s)",
+                "task %s: NETWORK_INTERFACE=%r has no routable IPv4 (%s); "
+                "skipping task silently",
                 task_id,
                 settings.network_interface,
                 exc,
             )
-            return None, "netif_no_ip"
+            return None, None
     if (
         settings.refuse_self_ip_speedtests
         and probe_public_ip

@@ -281,7 +281,14 @@ async def test_client_falls_back_when_destination_url_absent(fake_connect: Any) 
     assert handler_calls == [None]
 
 
-async def test_client_reports_netif_unavailable_error(fake_connect: Any) -> None:
+async def test_client_skips_result_when_handler_returns_none(fake_connect: Any) -> None:
+    """A handler that returns ``(None, None)`` must not send a ``result`` frame.
+
+    This covers the ``NETWORK_INTERFACE``-missing / no-routable-IPv4
+    scenarios in :mod:`xspeed_probe.main`: the probe decides to skip
+    the task, the client must stay silent so the server-side sweeper
+    can recycle the task instead of recording a hard error.
+    """
     _connect, sockets = fake_connect
 
     async def on_task(
@@ -290,7 +297,7 @@ async def test_client_reports_netif_unavailable_error(fake_connect: Any) -> None
         destination_url: str | None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
-        return None, "netif_unavailable"
+        return None, None
 
     settings = _settings(network_interface="lo")
     client = ProbeClient(settings, on_task=on_task)
@@ -310,18 +317,16 @@ async def test_client_reports_netif_unavailable_error(fake_connect: Any) -> None
                 }
             ),
         )
-        for _ in range(50):
-            if len(sockets[-1].sent) >= 2:
-                break
-            await asyncio.sleep(0.01)
+        # Give the client a chance to (not) reply.
+        await asyncio.sleep(0.05)
     finally:
         client.stop()
         await client.close()
         await asyncio.wait_for(runner, timeout=1.0)
 
-    result = json.loads(sockets[-1].sent[1])
-    assert result["speed_mbps"] is None
-    assert result["error"] == "netif_unavailable"
+    sent = sockets[-1].sent
+    types = [json.loads(m)["type"] for m in sent]
+    assert types == ["online"]
 
 
 async def test_client_ignores_unknown_message_types(fake_connect: Any) -> None:
