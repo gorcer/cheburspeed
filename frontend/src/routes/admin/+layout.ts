@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
-import { page } from "$app/state";
+import type { LoadEvent } from "@sveltejs/kit";
 
 import { auth } from "$lib/stores/auth.svelte";
 
@@ -9,10 +9,9 @@ export const prerender = false;
 
 const LOGIN_PATH = "/admin/login";
 
-export function load(): Record<string, never> {
+export function load({ url }: LoadEvent): Record<string, never> {
   if (!browser) return {};
-  const pathname = page.url.pathname;
-  if (pathname === LOGIN_PATH) {
+  if (url.pathname === LOGIN_PATH) {
     return {};
   }
   if (!auth.isAuthenticated) {
