@@ -110,6 +110,47 @@
         "description": "Параметры URL главной страницы: предзаполняют форму запуска теста."
       }
     },
+    "examples": {
+      "labels": {
+        "request": "Запрос",
+        "response": "Ответ"
+      },
+      "createTask": {
+        "request": "curl -X POST https://che.dataforest.app/api/v1/tasks \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"link\": \"vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\",\n    \"destination_id\": 2,\n    \"probe_tokens\": null\n  }'",
+        "response": "{\n  \"id\": 599,\n  \"status\": \"pending\",\n  \"destination_id\": 2,\n  \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\"\n}",
+        "status": "HTTP/1.1 201 Created"
+      },
+      "getTask": {
+        "request": "curl https://che.dataforest.app/api/v1/tasks/599",
+        "response": "{\n  \"id\": 599,\n  \"link\": \"vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\",\n  \"address\": \"node.example.com:443\",\n  \"status\": \"completed\",\n  \"probe_tokens\": null,\n  \"destination_id\": 2,\n  \"destination_name\": \"dataforest\",\n  \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\",\n  \"created_at\": \"2026-10-22T02:31:02.027359Z\",\n  \"completed_at\": \"2026-10-22T02:31:21.159490Z\",\n  \"results\": [\n    {\n      \"id\": 1584,\n      \"probe_id\": 2,\n      \"probe_alias\": \"primorje-mobile\",\n      \"region_id\": 61,\n      \"region_code\": \"PK\",\n      \"region_title\": \"Приморский край\",\n      \"speed_mbps\": null,\n      \"error\": \"netif_unavailable\",\n      \"created_at\": \"2026-10-22T02:31:13.703664Z\"\n    },\n    {\n      \"id\": 1588,\n      \"probe_id\": 1,\n      \"probe_alias\": \"primorje\",\n      \"region_id\": 61,\n      \"region_code\": \"PK\",\n      \"region_title\": \"Приморский край\",\n      \"speed_mbps\": 10.843,\n      \"error\": null,\n      \"created_at\": \"2026-10-22T02:31:20.159490Z\"\n    }\n  ]\n}",
+        "status": "HTTP/1.1 200 OK"
+      },
+      "listTasks": {
+        "request": "curl 'https://che.dataforest.app/api/v1/tasks?limit=1&offset=0'",
+        "response": "{\n  \"items\": [\n    {\n      \"id\": 599,\n      \"link\": \"vless://11111111-2222-3333-4444-5555…#demo\",\n      \"address\": \"node.example.com:443\",\n      \"status\": \"completed\",\n      \"destination_id\": 2,\n      \"destination_name\": \"dataforest\",\n      \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\",\n      \"created_at\": \"2026-10-22T02:31:02.027359Z\",\n      \"completed_at\": \"2026-10-22T02:31:21.159490Z\"\n    }\n  ],\n  \"limit\": 1,\n  \"offset\": 0,\n  \"total\": 598\n}",
+        "status": "HTTP/1.1 200 OK"
+      },
+      "listRegions": {
+        "request": "curl https://che.dataforest.app/api/v1/regions",
+        "response": "{\n  \"items\": [\n    {\n      \"id\": 61,\n      \"code\": \"PK\",\n      \"title\": \"Приморский край\",\n      \"lat\": null,\n      \"lon\": null,\n      \"probe_count\": 2,\n      \"last_median_mbps\": 22.422\n    },\n    {\n      \"id\": 68,\n      \"code\": \"RU-ALT\",\n      \"title\": \"Алтайский край\",\n      \"lat\": null,\n      \"lon\": null,\n      \"probe_count\": 0,\n      \"last_median_mbps\": null\n    }\n  ]\n}",
+        "status": "HTTP/1.1 200 OK"
+      },
+      "onlineProbes": {
+        "request": "curl https://che.dataforest.app/api/v1/probes/online",
+        "response": "{\n  \"regions\": {\n    \"PK\": {\n      \"online\": 2,\n      \"median_mbps\": 22.422,\n      \"last_speedtest_at\": \"2026-10-22T02:31:18.253156Z\"\n    },\n    \"RU-ALT\": {\n      \"online\": 0,\n      \"median_mbps\": null,\n      \"last_speedtest_at\": null\n    }\n  }\n}",
+        "status": "HTTP/1.1 200 OK"
+      },
+      "listDestinations": {
+        "request": "curl https://che.dataforest.app/api/v1/destinations",
+        "response": "{\n  \"items\": [\n    {\n      \"id\": 1,\n      \"name\": \"cloudflare\",\n      \"url\": \"https://speed.cloudflare.com/__down?bytes=10000000\"\n    },\n    {\n      \"id\": 2,\n      \"name\": \"dataforest\",\n      \"url\": \"https://dataforest.app/speed-test-20mb.bin\"\n    }\n  ]\n}",
+        "status": "HTTP/1.1 200 OK"
+      },
+      "urlParams": {
+        "request": "https://che.dataforest.app/?link=vless%3A%2F%2F11111111-2222-3333-4444-555555555555%40node.example.com%3A443%3Ftype%3Dws%26security%3Dtls%23demo&destination=2",
+        "response": "content-type: text/html\n\nГлавная страница открывается с уже заполненной формой:\n  поле vless-ссылки  → vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\n  список адресов     → dataforest (destination=2)\n\nКнопка «Запустить тест» создаёт задание POST /api/v1/tasks\nи перезаписывает адрес страницы на ?link=…&destination=….",
+        "status": "HTTP/1.1 200 OK"
+      }
+    },
     "wsTitle": "WebSocket",
     "wsDescription": "Пробы подключаются к /ws с токеном в заголовке Authorization: Bearer <token>. После online-сообщения сервер раздаёт задания (опционально с явным destination_url), проба возвращает результат.",
     "events": {

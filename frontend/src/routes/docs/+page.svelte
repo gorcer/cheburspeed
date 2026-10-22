@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DocsEndpoint from "$lib/components/DocsEndpoint.svelte";
   import { t, locale } from "$lib/stores/locale.svelte";
 
   const endpoints = [
@@ -10,8 +11,6 @@
     { key: "listDestinations" },
     { key: "urlParams" },
   ] as const;
-
-
 
   const events = ["taskAssigned", "online", "result"] as const;
 
@@ -40,21 +39,18 @@
     </h2>
     <ul class="space-y-2 text-sm">
       {#each endpoints as endpoint (endpoint.key)}
-        <li
-          class="rounded-card border border-surface-300 bg-surface-100/40 p-3"
-        >
-          <code class="font-mono text-xs text-primary">
-            {t(`docs.endpoints.${endpoint.key}.title`)}
-          </code>
-          <p class="mt-1 text-surface-content/70">
-            {t(`docs.endpoints.${endpoint.key}.description`)}
-          </p>
+        <li>
+          <DocsEndpoint
+            title={t(`docs.endpoints.${endpoint.key}.title`)}
+            description={t(`docs.endpoints.${endpoint.key}.description`)}
+            request={t(`docs.examples.${endpoint.key}.request`)}
+            response={t(`docs.examples.${endpoint.key}.response`)}
+            status={t(`docs.examples.${endpoint.key}.status`)}
+          />
         </li>
       {/each}
     </ul>
   </section>
-
-
 
   <section class="space-y-3">
     <h2
