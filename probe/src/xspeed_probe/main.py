@@ -8,12 +8,15 @@ collaborators:
 * :mod:`xspeed_probe.xray` — parses ``vless://`` URIs into JSON
   configs, spawns ``xray-core`` and waits for its SOCKS5 port to
   become ready.
+* :mod:`xspeed_probe.awg` — the same lifecycle for AmneziaWG tasks,
+  where ``link`` is an INI config and the tunnel comes from the
+  ``awgsocks`` userspace helper instead of xray.
 * :mod:`xspeed_probe.speedtest` — measures download throughput through
   the SOCKS proxy.
 
 A SIGTERM/SIGINT sets a stop event so the in-flight speedtest can be
-cancelled, xray is terminated, and the WebSocket is closed before the
-loop exits.
+cancelled, the tunnel helper is terminated, and the WebSocket is closed
+before the loop exits.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import socket
 from typing import Any
 from urllib.parse import urlparse
 
+from xspeed_probe.awg import AwgManager
 from xspeed_probe.config import ProbeSettings, get_settings
 from xspeed_probe.netif import (
     InterfaceNoIpError,
@@ -34,7 +38,7 @@ from xspeed_probe.netif import (
     resolve_interface_ip,
 )
 from xspeed_probe.speedtest import SpeedtestError, measure
-from xspeed_probe.wsclient import ProbeClient, run_probe
+from xspeed_probe.wsclient import DEFAULT_PROTOCOL, ProbeClient, run_probe
 from xspeed_probe.xray import XrayManager
 
 logger = logging.getLogger(__name__)
@@ -85,10 +89,19 @@ async def _run_task(
     *,
     settings: ProbeSettings,
     xray: XrayManager,
+    awg: AwgManager | None = None,
+    protocol: str = DEFAULT_PROTOCOL,
     speedtest_url: str | None = None,
     probe_public_ip: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Drive a single task to completion and return ``(speed_mbps, error)``.
+
+    ``protocol`` selects the tunnel implementation: ``vless`` starts
+    xray-core with ``send_through`` pinned to the configured NIC, while
+    ``amneziawg`` starts the ``awgsocks`` userspace helper and passes the
+    NIC name itself (``SO_BINDTODEVICE``). Everything after the tunnel
+    is up — the self-IP guard, the measurement and the teardown — is
+    shared.
 
     ``speedtest_url`` overrides :attr:`ProbeSettings.speedtest_url` when
     provided; otherwise the probe falls back to its configured default.
@@ -96,19 +109,38 @@ async def _run_task(
     probe; when set and :attr:`ProbeSettings.refuse_self_ip_speedtests`
     is true, we skip the run if ``speedtest_url`` resolves to it.
 
-    When ``settings.network_interface`` is set, the probe resolves the
-    interface's IPv4 right before launching xray and forwards it as the
+    When ``settings.network_interface`` is set, the probe verifies the
+    interface is usable right before launching the tunnel. For xray it
+    also resolves the interface's IPv4 and forwards it as the
     ``sendThrough`` field on the vless outbound. The resolution happens
     on every task so a DHCP lease change between runs is picked up
     without restarting the probe.
     """
+    if protocol == "vless":
+        tunnel: XrayManager | AwgManager = xray
+        # xray accepts both an explicit source address (``sendThrough``)
+        # and the NIC name; awgsocks only takes the NIC name.
+        start_kwargs: dict[str, Any] = {"send_through": None}
+        start_error = "xray_start_failed"
+        not_ready_error = "xray_not_ready"
+    elif protocol == "amneziawg" and awg is not None:
+        tunnel = awg
+        start_kwargs = {}
+        start_error = "awg_start_failed"
+        not_ready_error = "awg_not_ready"
+    else:
+        logger.error(
+            "task %s: protocol %r is not supported by this probe build",
+            task_id,
+            protocol,
+        )
+        return None, f"awg_unsupported_protocol: {protocol}"
     target_url = speedtest_url or settings.speedtest_url
-    send_through: str | None = None
     if settings.network_interface:
         if not ensure_interface_available(settings.network_interface):
             return None, None
         try:
-            send_through = resolve_interface_ip(settings.network_interface)
+            interface_ip = resolve_interface_ip(settings.network_interface)
         except NetworkInterfaceUnavailableError:
             return None, None
         except InterfaceNoIpError as exc:
@@ -120,6 +152,9 @@ async def _run_task(
                 exc,
             )
             return None, None
+        start_kwargs["network_interface"] = settings.network_interface
+        if "send_through" in start_kwargs:
+            start_kwargs["send_through"] = interface_ip
     if (
         settings.refuse_self_ip_speedtests
         and probe_public_ip
@@ -134,23 +169,18 @@ async def _run_task(
         )
         return None, "self_ip_forbidden"
     try:
-        xray.start(
-            task_id,
-            link,
-            send_through=send_through,
-            network_interface=settings.network_interface,
-        )
+        tunnel.start(task_id, link, **start_kwargs)
     except Exception as exc:  # noqa: BLE001 - surface as result error
-        logger.exception("failed to start xray for task %s", task_id)
-        return None, f"xray_start_failed: {exc}"
+        logger.exception("failed to start tunnel for task %s", task_id)
+        return None, f"{start_error}: {exc}"
     try:
-        ready = await xray.wait_ready(task_id)
+        ready = await tunnel.wait_ready(task_id)
         if not ready:
-            return None, "xray_not_ready"
+            return None, not_ready_error
         try:
             result = await measure(
                 target_url,
-                proxy_url=xray.socks_url,
+                proxy_url=tunnel.socks_url,
                 timeout_seconds=settings.speedtest_timeout,
             )
         except SpeedtestError as exc:
@@ -165,18 +195,20 @@ async def _run_task(
         )
         return result.speed_mbps, None
     finally:
-        xray.terminate(task_id)
+        tunnel.terminate(task_id)
 
 
 def _build_handler(
     settings: ProbeSettings,
     xray: XrayManager,
+    awg: AwgManager,
 ) -> Any:
     """Return an async callback suitable for :class:`ProbeClient`."""
 
     async def handler(
         task_id: int,
         link: str,
+        protocol: str,
         destination_url: str | None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
@@ -185,6 +217,8 @@ def _build_handler(
             link,
             settings=settings,
             xray=xray,
+            awg=awg,
+            protocol=protocol,
             speedtest_url=destination_url,
             probe_public_ip=probe_public_ip,
         )
@@ -215,13 +249,21 @@ async def _amain(stop: asyncio.Event) -> None:
         config_dir=settings.xray_config_dir,
         ready_timeout=settings.xray_ready_timeout,
     )
-    handler = _build_handler(settings, xray)
+    awg = AwgManager(
+        socks_host=settings.xray_socks_host,
+        socks_port=settings.xray_socks_port,
+        config_dir=settings.xray_config_dir,
+        awgproxy_binary=settings.awgproxy_binary,
+        ready_timeout=settings.awg_ready_timeout,
+    )
+    handler = _build_handler(settings, xray, awg)
     client = ProbeClient(settings, on_task=handler, version=settings.version)
     try:
         await _drive(client, stop)
     finally:
         await client.close()
         xray.terminate_all()
+        awg.terminate_all()
 
 
 async def _drive(client: ProbeClient, stop: asyncio.Event) -> None:

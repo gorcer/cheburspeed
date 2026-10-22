@@ -7,6 +7,8 @@ The tests cover:
 * the rate limit on the POST endpoint (10/hour → 11th call returns 429),
 * the ``GET /api/v1/tasks/{id}`` shape (with and without results),
 * the paginated list at ``GET /api/v1/tasks``,
+* the AmneziaWG branch (``protocol='amneziawg'`` carries an INI config
+  instead of a ``vless://`` URI),
 * the ``GET /api/v1/regions`` aggregated view,
 * the ``GET /api/v1/probes/online`` per-region summary.
 """
@@ -25,6 +27,37 @@ VALID_LINK = (
     "?security=reality&sni=cdn.example.com&type=tcp#demo"
 )
 INVALID_LINK = "vless://not-a-uuid@example.com:443?foo=bar"
+
+# A real AmneziaVPN export: base64 keys, spaces around "=", CRLF endings
+# on Windows clients. The keys are throwaway test material.
+VALID_AWG_LINK = (
+    "[Interface]\r\n"
+    "PrivateKey = cNx0N+nxLtxHhbHG1M1tM8pDvDNnOWGbkpHFrTnHqAA=\r\n"
+    "Address = 10.8.40.106/32\r\n"
+    "DNS = 1.1.1.1,1.0.0.1\r\n"
+    "Jc = 3\r\n"
+    "Jmin = 10\r\n"
+    "Jmax = 50\r\n"
+    "S1 = 150\r\n"
+    "S2 = 224\r\n"
+    "S3 = 0\r\n"
+    "S4 = 0\r\n"
+    "H1 = 1232863036\r\n"
+    "H2 = 1441878557\r\n"
+    "H3 = 636923766\r\n"
+    "H4 = 214107436\r\n"
+    "\r\n"
+    "[Peer]\r\n"
+    "PublicKey = fgI6VqMCIvjErRo2vL6XQhDqfBiK+FTxLBRLxMCCZVU=\r\n"
+    "PresharedKey = pkcDjyh0jW8RFTLvhEEeMk4SPT7WUEPGyN/ZXGQE2Vk=\r\n"
+    "Endpoint = in.oneyearsolution.com:40974\r\n"
+    "AllowedIPs = 0.0.0.0/0, ::/0\r\n"
+    "PersistentKeepalive = 25\r\n"
+)
+AWG_WITHOUT_ENDPOINT = VALID_AWG_LINK.replace(
+    "Endpoint = in.oneyearsolution.com:40974\r\n",
+    "",
+)
 
 
 def _test_dsn() -> str:
@@ -99,6 +132,7 @@ async def test_post_task_with_valid_link_returns_201(
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["status"] == "pending"
+    assert body["protocol"] == "vless"
     assert isinstance(body["id"], int) and body["id"] > 0
     assert body["destination_id"] == destination["id"]
     assert body["destination_url"] == destination["url"]
@@ -189,6 +223,156 @@ async def test_post_task_is_rate_limited_after_ten_requests(
     assert last_status == 429, f"expected 429, got {last_status}: {blocked.text}"
 
 
+async def test_post_amneziawg_task_returns_201(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    response = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": VALID_AWG_LINK,
+            "destination_id": destination["id"],
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["protocol"] == "amneziawg"
+
+
+async def test_post_amneziawg_task_stores_config_verbatim(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    created = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": VALID_AWG_LINK,
+            "destination_id": destination["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    task_id = created.json()["id"]
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            "SELECT protocol, link FROM tasks WHERE id = $1",
+            task_id,
+        )
+    finally:
+        await conn.close()
+
+    assert row["protocol"] == "amneziawg"
+    assert row["link"] == VALID_AWG_LINK
+
+
+async def test_get_task_reports_amneziawg_protocol_and_endpoint(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    created = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": VALID_AWG_LINK,
+            "destination_id": destination["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    response = await client.get(f"/api/v1/tasks/{created.json()['id']}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["protocol"] == "amneziawg"
+    assert body["address"] == "in.oneyearsolution.com:40974"
+
+
+async def test_list_tasks_reports_amneziawg_protocol(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": VALID_AWG_LINK,
+            "destination_id": destination["id"],
+        },
+    )
+    response = await client.get("/api/v1/tasks")
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["protocol"] == "amneziawg"
+    assert item["address"] == "in.oneyearsolution.com:40974"
+
+
+async def test_post_amneziawg_task_without_endpoint_returns_422(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    response = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": AWG_WITHOUT_ENDPOINT,
+            "destination_id": destination["id"],
+        },
+    )
+    assert response.status_code == 422, response.text
+    detail = response.json()
+    assert detail["detail"][0]["loc"] == ["body", "link"]
+
+
+async def test_post_amneziawg_task_with_vless_link_returns_422(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    response = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": VALID_LINK,
+            "destination_id": destination["id"],
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "link"]
+
+
+async def test_post_vless_task_with_awg_config_returns_422(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    response = await client.post(
+        "/api/v1/tasks",
+        json={"link": VALID_AWG_LINK, "destination_id": destination["id"]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "link"]
+
+
+async def test_post_task_rejects_unknown_protocol(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    response = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "wireguard",
+            "link": VALID_LINK,
+            "destination_id": destination["id"],
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
+async def test_post_amneziawg_task_rejects_link_beyond_max_length(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    padded = VALID_AWG_LINK + ("# padding\r\n" * 2000)
+    response = await client.post(
+        "/api/v1/tasks",
+        json={
+            "protocol": "amneziawg",
+            "link": padded,
+            "destination_id": destination["id"],
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
 async def test_get_task_returns_404_for_unknown_id(client: AsyncClient) -> None:
     response = await client.get("/api/v1/tasks/999999")
     assert response.status_code == 404, response.text
@@ -210,6 +394,7 @@ async def test_get_task_returns_task_with_results(
     assert body["id"] == task_id
     assert body["status"] == "pending"
     assert body["link"] == VALID_LINK
+    assert body["protocol"] == "vless"
     assert body["address"] == "example.com:443"
     assert body["probe_tokens"] is None
     assert body["destination_id"] == destination["id"]
@@ -269,6 +454,7 @@ async def test_list_tasks_returns_paginated_envelope(
     assert all(
         item["destination_id"] == destination["id"]
         and item["destination_url"] == destination["url"]
+        and item["protocol"] == "vless"
         for item in body["items"]
     )
 

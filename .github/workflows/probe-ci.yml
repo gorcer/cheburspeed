@@ -66,10 +66,30 @@ jobs:
         working-directory: probe
         run: uv run pytest
 
+  go-test:
+    name: go vet + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Must match the `go` directive in probe/awgproxy/go.mod.
+          go-version: '1.25'
+          cache-dependency-path: probe/awgproxy/go.sum
+
+      - name: Vet
+        working-directory: probe/awgproxy
+        run: go vet ./...
+
+      - name: Test
+        working-directory: probe/awgproxy
+        run: go test ./...
+
   docker:
     name: multi-arch build
     runs-on: ubuntu-latest
-    needs: [ruff, pytest]
+    needs: [ruff, pytest, go-test]
     permissions:
       contents: read
       packages: write

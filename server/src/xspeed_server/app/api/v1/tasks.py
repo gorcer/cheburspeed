@@ -12,20 +12,71 @@ Exposes:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
 from asyncpg import Connection
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from xspeed_server.app.core.ratelimit import limiter
 from xspeed_server.app.deps import PoolDep
+from xspeed_server.app.ws.protocol import TaskProtocol
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VLESS_LINK_PATTERN = r"^vless://[0-9a-f-]{36}@[\w.-]+:\d+\?.*$"
+
+SUPPORTED_PROTOCOLS: tuple[TaskProtocol, ...] = ("vless", "amneziawg")
+
+MAX_LINK_LENGTH = 8192
+
+AWG_REQUIRED_INTERFACE_KEYS = ("PrivateKey", "Address")
+AWG_REQUIRED_PEER_KEYS = ("PublicKey", "Endpoint")
+
+
+def _validate_awg_link(link: str) -> str:
+    """Return ``link`` when it looks like an AmneziaWG INI config.
+
+    The check is deliberately structural rather than a full parser: the
+    probe owns the authoritative parsing (``xspeed_probe.awg``) and
+    rejects anything it cannot dial. Here we only reject payloads the
+    probe could never use, so the API fails fast on an empty textarea
+    or a pasted ``vless://`` URI with the protocol set to ``amneziawg``.
+    """
+    sections: dict[str, set[str]] = {}
+    current: str | None = None
+    for raw_line in link.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1].strip().lower()
+            sections.setdefault(current, set())
+            continue
+        if current is None or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if value.strip():
+            sections[current].add(key.strip().lower())
+    interface = sections.get("interface", set())
+    peer = sections.get("peer", set())
+    missing = [
+        name
+        for name in AWG_REQUIRED_INTERFACE_KEYS + AWG_REQUIRED_PEER_KEYS
+        if name.lower() not in interface and name.lower() not in peer
+    ]
+    if not interface or not peer:
+        missing.append("[Interface]/[Peer]")
+    if missing:
+        raise ValueError(
+            "amneziawg link must be an INI config with [Interface] "
+            "(PrivateKey, Address) and [Peer] (PublicKey, Endpoint); missing: "
+            + ", ".join(missing),
+        )
+    return link
 
 
 class TaskCreate(BaseModel):
@@ -33,12 +84,22 @@ class TaskCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    protocol: TaskProtocol = Field(
+        default="vless",
+        description=(
+            "Tunnel protocol the ``link`` field carries. ``vless`` expects a "
+            "``vless://`` URI, ``amneziawg`` expects the official AmneziaVPN "
+            "INI config (``[Interface]``/``[Peer]``)."
+        ),
+    )
     link: str = Field(
         ...,
         min_length=1,
-        max_length=2048,
-        pattern=VLESS_LINK_PATTERN,
-        description="vless:// URI; full schema is validated by FastAPI's regex.",
+        max_length=MAX_LINK_LENGTH,
+        description=(
+            "vless:// URI when protocol is ``vless``; a full AmneziaWG INI "
+            "config when protocol is ``amneziawg``."
+        ),
     )
     destination_id: int = Field(
         ...,
@@ -56,6 +117,23 @@ class TaskCreate(BaseModel):
         ),
     )
 
+    @field_validator("link")
+    @classmethod
+    def _check_link(cls, value: str, info: ValidationInfo) -> str:
+        """Validate ``link`` against the declared ``protocol``.
+
+        Declared before ``link`` so ``info.data`` already holds it; this
+        keeps the reported error location at ``["body", "link"]`` — the
+        same shape callers already handle.
+        """
+        protocol = info.data.get("protocol", "vless")
+        if protocol == "amneziawg":
+            _validate_awg_link(value)
+            return value
+        if not re.fullmatch(VLESS_LINK_PATTERN, value):
+            raise ValueError("link must be a vless:// URI when protocol is 'vless'")
+        return value
+
     @field_validator("probe_tokens")
     @classmethod
     def _strip_probe_tokens(cls, value: list[str] | None) -> list[str] | None:
@@ -72,6 +150,7 @@ class TaskCreatedResponse(BaseModel):
 
     id: int
     status: str
+    protocol: TaskProtocol
     destination_id: int
     destination_url: str
 
@@ -95,6 +174,7 @@ class TaskDetail(BaseModel):
 
     id: int
     link: str
+    protocol: TaskProtocol
     address: str | None
     status: str
     probe_tokens: list[str] | None
@@ -111,6 +191,7 @@ class TaskSummary(BaseModel):
 
     id: int
     link: str
+    protocol: TaskProtocol
     address: str | None
     status: str
     destination_id: int | None
@@ -132,6 +213,7 @@ class TaskList(BaseModel):
 async def _insert_task(
     conn: Connection,
     link: str,
+    protocol: str,
     destination_id: int,
     probe_tokens: list[str] | None,
 ) -> int:
@@ -145,11 +227,12 @@ async def _insert_task(
     try:
         row = await conn.fetchrow(
             """
-            INSERT INTO tasks (link, destination_id, status, probe_tokens, created_at)
-            VALUES ($1, $2, 'pending', $3::jsonb, now())
+            INSERT INTO tasks (link, protocol, destination_id, status, probe_tokens, created_at)
+            VALUES ($1, $2, $3, 'pending', $4::jsonb, now())
             RETURNING id
             """,
             link,
+            protocol,
             destination_id,
             None if probe_tokens is None else json.dumps(probe_tokens),
         )
@@ -177,7 +260,7 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
     """Fetch the task header plus its results in a single connection checkout."""
     task_row = await conn.fetchrow(
         """
-        SELECT id, link, status, probe_tokens, destination_id, created_at, completed_at
+        SELECT id, link, protocol, status, probe_tokens, destination_id, created_at, completed_at
         FROM tasks
         WHERE id = $1
         """,
@@ -208,10 +291,12 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
         """,
         task_id,
     )
+    protocol = str(task_row["protocol"])
     return {
         "id": task_row["id"],
         "link": task_row["link"],
-        "address": _extract_address(str(task_row["link"])),
+        "protocol": protocol,
+        "address": _extract_address(str(task_row["link"]), protocol),
         "status": task_row["status"],
         "probe_tokens": list(task_row["probe_tokens"]) if task_row["probe_tokens"] else None,
         "destination_id": destination_id,
@@ -223,16 +308,22 @@ async def _fetch_task_with_results(conn: Connection, task_id: int) -> dict[str, 
     }
 
 
-def _extract_address(link: str) -> str | None:
-    """Return ``host[:port]`` parsed from a vless:// URI, or None on failure.
+def _extract_address(link: str, protocol: str) -> str | None:
+    """Return ``host[:port]`` of the tunnel endpoint, or ``None`` on failure.
 
-    The vless URI shape is ``vless://<UUID>@<host>:<port>?<query>#<name>``;
+    For ``vless`` the URI shape is ``vless://<UUID>@<host>:<port>?<query>#<name>``;
     :func:`urllib.parse.urlparse` already handles the userinfo split so
     :attr:`ParseResult.hostname` and :attr:`ParseResult.port` are exactly
     what we need to surface in the UI. We bracket an IPv6 host (no port
     is exposed by ``urlparse`` in that case but the operator can still
     see the address).
+
+    For ``amneziawg`` the endpoint lives in the ``[Peer]`` section of the
+    INI config as ``Endpoint = host:port``; the same split is applied so
+    the "Адрес" column keeps working for both protocols.
     """
+    if protocol == "amneziawg":
+        return _extract_awg_endpoint(link)
     try:
         parsed = urlparse(link)
     except ValueError:
@@ -245,6 +336,22 @@ def _extract_address(link: str) -> str | None:
     if parsed.port is not None:
         return f"{host}:{parsed.port}"
     return host
+
+
+def _extract_awg_endpoint(link: str) -> str | None:
+    """Return the ``Endpoint`` value of the first ``[Peer]`` section."""
+    in_peer = False
+    for raw_line in link.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            in_peer = line[1:-1].strip().lower() == "peer"
+            continue
+        if not in_peer or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip().lower() == "endpoint" and value.strip():
+            return value.strip()
+    return None
 
 
 def _is_foreign_key_violation(exc: BaseException) -> bool:
@@ -265,7 +372,7 @@ async def create_task(
     payload: TaskCreate,
     pool: PoolDep,
 ) -> TaskCreatedResponse:
-    """Validate the vless link, insert a ``pending`` row and return its id."""
+    """Validate the tunnel link, insert a ``pending`` row and return its id."""
     async with pool.acquire() as conn:
         destination = await _resolve_destination(conn, payload.destination_id)
         if destination is None:
@@ -273,6 +380,7 @@ async def create_task(
         task_id = await _insert_task(
             conn,
             payload.link,
+            payload.protocol,
             payload.destination_id,
             payload.probe_tokens,
         )
@@ -282,6 +390,7 @@ async def create_task(
     return TaskCreatedResponse(
         id=task_id,
         status="pending",
+        protocol=payload.protocol,
         destination_id=payload.destination_id,
         destination_url=destination_url,
     )
@@ -323,7 +432,7 @@ async def list_tasks(
         total = await conn.fetchval("SELECT count(*) FROM tasks")
         rows = await conn.fetch(
             """
-            SELECT t.id, t.link, t.status, t.destination_id,
+            SELECT t.id, t.link, t.protocol, t.status, t.destination_id,
                    d.name AS destination_name,
                    d.url  AS destination_url,
                    t.created_at, t.completed_at
@@ -340,10 +449,12 @@ async def list_tasks(
 
 
 def _row_to_summary(row: Any) -> dict[str, Any]:
+    protocol = str(row["protocol"])
     return {
         "id": int(row["id"]),
         "link": str(row["link"]),
-        "address": _extract_address(str(row["link"])),
+        "protocol": protocol,
+        "address": _extract_address(str(row["link"]), protocol),
         "status": str(row["status"]),
         "destination_id": row["destination_id"],
         "destination_name": row["destination_name"],
@@ -355,10 +466,12 @@ def _row_to_summary(row: Any) -> dict[str, Any]:
 
 __all__ = [
     "router",
+    "SUPPORTED_PROTOCOLS",
     "TaskCreate",
     "TaskCreatedResponse",
     "TaskDetail",
     "TaskList",
+    "TaskProtocol",
     "TaskSummary",
     "TaskResultItem",
     "VLESS_LINK_PATTERN",

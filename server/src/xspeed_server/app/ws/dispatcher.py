@@ -23,13 +23,17 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 
 from xspeed_server.app.db import Database
 from xspeed_server.app.ws.hub import Hub
-from xspeed_server.app.ws.protocol import PROTOCOL_VERSION, TaskAssignedMessage
+from xspeed_server.app.ws.protocol import (
+    PROTOCOL_VERSION,
+    TaskAssignedMessage,
+    TaskProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,7 @@ class ClaimedTask:
 
     id: int
     link: str
+    protocol: TaskProtocol
     destination_url: str | None
     probe_public_ip: str | None
 
@@ -65,7 +70,9 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
 
     On success the row is flipped to ``running`` with
     ``assigned_to = probe_token`` and ``started_at = now()`` inside
-    the same transaction. The destination URL is joined from
+    the same transaction. ``protocol`` is carried through unchanged so
+    the probe knows whether ``link`` is a ``vless://`` URI or a full
+    AmneziaWG INI config. The destination URL is joined from
     ``destinations`` so the dispatcher can pass an override to the
     probe instead of letting it fall back to its
     ``settings.speedtest_url``. The probe's most recently seen IP is
@@ -75,7 +82,7 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
     async with conn.transaction():
         row = await conn.fetchrow(
             """
-            SELECT t.id, t.link, d.url AS destination_url, p.ip AS probe_ip
+            SELECT t.id, t.link, t.protocol, d.url AS destination_url, p.ip AS probe_ip
             FROM tasks t
             LEFT JOIN destinations d ON d.id = t.destination_id
             CROSS JOIN probes p
@@ -101,6 +108,10 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
             return None
         task_id = int(row["id"])
         link = str(row["link"])
+        # ck_tasks_protocol makes anything outside the Literal
+        # unreachable, so the cast documents the constraint instead of
+        # re-validating a value the database already guarantees.
+        protocol = cast(TaskProtocol, str(row["protocol"]))
         destination_url: str | None = row["destination_url"]
         probe_public_ip: str | None = row["probe_ip"]
         await conn.execute(
@@ -118,6 +129,7 @@ async def claim_task(conn: asyncpg.Connection, probe_token: str) -> ClaimedTask 
     return ClaimedTask(
         id=task_id,
         link=link,
+        protocol=protocol,
         destination_url=destination_url,
         probe_public_ip=probe_public_ip,
     )
@@ -273,6 +285,7 @@ async def dispatch_to_probe(db: Database, hub: Hub, probe_token: str) -> bool:
         return False
     message = TaskAssignedMessage(
         task_id=claimed.id,
+        protocol=claimed.protocol,
         link=claimed.link,
         destination_url=claimed.destination_url,
         protocol_version=PROTOCOL_VERSION,

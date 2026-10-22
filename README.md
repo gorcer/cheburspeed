@@ -1,11 +1,12 @@
 # CheburSpeed
 
-Сервис мониторинга скорости работы vless соединений.
+Сервис мониторинга скорости работы vless и AmneziaWG соединений.
 
 ## Структура монорепо
 
 - `server/` — FastAPI backend (REST API + WebSocket), PostgreSQL, JWT auth.
-- `probe/` — клиентская проба (xray + speedtest через WebSocket),
+- `probe/` — клиентская проба (xray для VLESS, userspace-хелпер
+  `awgproxy` для AmneziaWG + speedtest через WebSocket),
   multi-arch Docker-образ (`linux/amd64`, `linux/arm64`).
 - `frontend/` — SvelteKit UI (карта нод, live-результаты тестов).
 - `nginx/` — реверс-прокси. `nginx.conf` для dev,
@@ -306,6 +307,8 @@ make probe-run        # uv run xspeed-probe
 через 5 минут вернёт её в очередь. IPv4 резолвится на каждый замер
 через SIOCGIFADDR и кладётся в `sendThrough` vless-outbound — так
 xray действительно пинит NIC, а не идёт через default route.
+Для задач AmneziaWG вместо IP передаётся имя интерфейса: хелпер
+`awgsocks` применяет `SO_BINDTODEVICE` к своему UDP-сокету.
 
 ### Поднять пробу через USB-модем телефона
 

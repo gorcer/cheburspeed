@@ -165,6 +165,17 @@
     return `${value.slice(0, max - 1)}…`;
   }
 
+  // An AmneziaWG task stores the tunnel's PrivateKey inside tasks.link,
+  // so the raw config must never be rendered here — not even truncated.
+  // The endpoint from the [Peer] section is enough to identify the task.
+  function displayLink(value: string): string {
+    if (!/^\s*\[/m.test(value)) return truncate(value);
+    const endpoint = value
+      .split(/\r?\n/)
+      .find((line) => line.trim().toLowerCase().startsWith("endpoint="));
+    return endpoint ? `amneziawg ${truncate(endpoint.trim())}` : "amneziawg";
+  }
+
   const currentPageNumber = $derived(
     Math.floor(filters.offset / filters.limit) + 1,
   );
@@ -318,7 +329,7 @@
                 <td class="py-2 pr-3 font-mono">{task.id}</td>
                 <td class="py-2 pr-3">
                   <code class="text-[11px] text-surface-content/80"
-                    >{truncate(task.link)}</code
+                    >{displayLink(task.link)}</code
                   >
                 </td>
                 <td class="py-2 pr-3">

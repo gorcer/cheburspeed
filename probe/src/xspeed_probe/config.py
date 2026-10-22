@@ -65,6 +65,24 @@ class ProbeSettings(BaseSettings):
     xray_socks_port: int = Field(default=1080, ge=1, le=65535)
     xray_config_dir: str = Field(default="/tmp")  # noqa: S108 - ephemeral xray configs
     xray_ready_timeout: float = Field(default=10.0, gt=0.0)
+    awgproxy_binary: str = Field(
+        default="/usr/local/bin/awgsocks",
+        description=(
+            "AmneziaWG userspace helper shipped in the probe image. It "
+            "exposes the tunnel as a SOCKS5 proxy on the same "
+            "``xray_socks_host``/``xray_socks_port`` pair xray uses, so "
+            "both protocols share one local proxy port."
+        ),
+    )
+    awg_ready_timeout: float = Field(
+        default=15.0,
+        gt=0.0,
+        description=(
+            "Seconds to wait for the AmneziaWG tunnel's SOCKS port. "
+            "Higher than xray's because the handshake with the tunnel "
+            "endpoint adds a round trip on top of process startup."
+        ),
+    )
     speedtest_timeout: float = Field(
         default=20.0,
         gt=0.0,

@@ -4,6 +4,8 @@ const apiBase = (import.meta.env.PUBLIC_API_BASE ?? "/api") as string;
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
+export type TaskProtocol = "vless" | "amneziawg";
+
 export interface TaskResult {
   id: number;
   probe_id: number;
@@ -19,6 +21,7 @@ export interface TaskResult {
 export interface Task {
   id: number;
   link: string;
+  protocol: TaskProtocol;
   address: string | null;
   status: TaskStatus;
   probe_tokens: string[] | null;
@@ -33,6 +36,7 @@ export interface Task {
 export interface TaskSummary {
   id: number;
   link: string;
+  protocol: TaskProtocol;
   address: string | null;
   status: TaskStatus;
   destination_id: number | null;
@@ -44,6 +48,7 @@ export interface TaskSummary {
 
 export interface CreateTaskOptions {
   destinationId: number;
+  protocol?: TaskProtocol;
   probeTokens?: string[];
 }
 
@@ -105,6 +110,7 @@ export function createTask(
     method: "POST",
     body: JSON.stringify({
       link,
+      protocol: opts.protocol ?? "vless",
       destination_id: opts.destinationId,
       probe_tokens: opts.probeTokens,
     }),

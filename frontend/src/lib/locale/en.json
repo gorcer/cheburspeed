@@ -1,7 +1,7 @@
 {
   "app": {
     "title": "CheburSpeed",
-    "subtitle": "VLESS connection speed monitoring service"
+    "subtitle": "VLESS and AmneziaWG connection speed monitoring service"
   },
   "nav": {
     "home": "Home",
@@ -10,9 +10,10 @@
     "language": "Language"
   },
   "form": {
-    "title": "Test a VLESS link",
-    "description": "Paste a vless:// link — probes across regions will run the speedtest and refresh the map.",
+    "title": "Test a connection",
+    "description": "Paste a vless:// link or an AmneziaWG config — probes across regions will run the speedtest and refresh the map.",
     "linkPlaceholder": "vless://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@host:443?...",
+    "linkLabel": "vless:// link",
     "submit": "Run check",
     "submitting": "Submitting…",
     "errorInvalid": "Link must start with vless://",
@@ -20,7 +21,14 @@
     "destinationLabel": "Speedtest target",
     "destinationPlaceholder": "— select —",
     "destinationEmpty": "No targets available yet. Add one in the admin panel.",
-    "destinationRequired": "Select a speedtest target"
+    "destinationRequired": "Select a speedtest target",
+    "protocolLabel": "Protocol",
+    "protocolVless": "VLESS",
+    "protocolAmneziawg": "AmneziaWG",
+    "awgLabel": "AmneziaWG config",
+    "awgPlaceholder": "[Interface]\nPrivateKey = …\nAddress = 10.8.40.106/32\n\n[Peer]\nPublicKey = …\nEndpoint = host:port\nAllowedIPs = 0.0.0.0/0",
+    "awgRequired": "Paste an AmneziaWG config",
+    "errorInvalidAwg": "The config must contain [Interface] and [Peer] sections"
   },
   "map": {
     "title": "Region map",
@@ -83,7 +91,7 @@
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
-        "description": "Create a new task. Body: { link, destination_id, probe_tokens? }."
+        "description": "Create a new task. Body: { link, protocol, destination_id, probe_tokens? }. protocol is vless (default) or amneziawg; link is a vless:// URI or an AmneziaWG INI config."
       },
       "getTask": {
         "title": "GET /api/v1/tasks/{id}",
@@ -116,8 +124,8 @@
         "response": "Response"
       },
       "createTask": {
-        "request": "curl -X POST https://che.dataforest.app/api/v1/tasks \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"link\": \"vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\",\n    \"destination_id\": 2,\n    \"probe_tokens\": null\n  }'",
-        "response": "{\n  \"id\": 599,\n  \"status\": \"pending\",\n  \"destination_id\": 2,\n  \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\"\n}",
+        "request": "curl -X POST https://che.dataforest.app/api/v1/tasks \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"protocol\": \"vless\",\n    \"link\": \"vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\",\n    \"destination_id\": 2,\n    \"probe_tokens\": null\n  }'",
+        "response": "{\n  \"id\": 599,\n  \"status\": \"pending\",\n  \"protocol\": \"vless\",\n  \"destination_id\": 2,\n  \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\"\n}",
         "status": "HTTP/1.1 201 Created"
       },
       "getTask": {

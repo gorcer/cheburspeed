@@ -1,24 +1,33 @@
 # Probe
 
 Клиент-проба — регистрируется на сервере по токену и через WebSocket
-получает задания на замер скорости vless-соединений. Для каждого
-задания запускает локальный [xray-core](https://github.com/XTLS/Xray-core),
-подключается к указанному vless://-эндпоинту и замеряет download
-throughput через SOCKS5-прокси.
+получает задания на замер скорости туннелей. Поддерживаются два
+протокола, оба публикуют туннель локально на SOCKS5 `127.0.0.1:1080`:
+
+* **VLESS** — локальный [xray-core](https://github.com/XTLS/Xray-core)
+  запускается с конфигом из `vless://`-ссылки;
+* **AmneziaWG** — userspace-хелпер `awgsocks` (см. ниже) поднимает
+  туннель из INI-конфига AmneziaVPN.
+
+Замер скорости в обоих случаях идёт через этот SOCKS-прокси.
 
 ## Архитектура
 
 ```
-                   +--------------------+
+                    +--------------------+
    WS (online,     |                    |   subprocess.Popen
-   task.assigned,  |     probe          |   xray run -c …
+   task.assigned,  |     probe          |   xray run -c …            (vless)
    result)         |                    |   +--> SOCKS5 127.0.0.1:1080
    <-------------> |  wsclient  | xray  |                 |
-                   |  + speedtest + netif                 v
-                   +--------------------+        httpx GET (proxy)
-                                                        |
-                                                        v
-                                           SPEEDTEST_URL (Cloudflare)
+                   |  + awg     | awg   |   subprocess.Popen
+                   |  + speedtest + netif  awgsocks -config …
+                   +--------------------+   +--> SOCKS5 127.0.0.1:1080
+                                                         |
+                                                         v
+                                            httpx GET (proxy)
+                                                         |
+                                                         v
+                                            SPEEDTEST_URL (Cloudflare)
 ```
 
 * `config.py` — pydantic-settings (`SERVER_URL`, `PROBE_TOKEN`,
@@ -33,10 +42,60 @@ throughput через SOCKS5-прокси.
   Если проба передала IPv4 интерфейса, кладёт его в `sendThrough` —
   так xray действительно пинит исходящий NIC, а не идёт через
   default route.
+* `awg.py` — парсит INI-конфиг AmneziaWG (`[Interface]` / `[Peer]`),
+  декодирует base64-ключи в hex (UAPI `amneziawg-go` понимает только
+  hex), пишет JSON для хелпера и управляет его процессом.
 * `speedtest.py` — `httpx.AsyncClient` через SOCKS-прокси, стримит
   тело ответа, вычисляет Mbps по фактически скачанным байтам.
 * `wsclient.py` — WebSocket-клиент с `ping_interval=30` и
   reconnect+backoff (1s → 30s).
+
+## AmneziaWG: почему userspace
+
+AWG-обфускации нет ни в xray-core, ни в sing-box, поэтому туннель
+строит отдельный хелпер `probe/awgproxy/` на
+[`amneziawg-go/v3`](https://github.com/amnezia-vpn/amneziawg-go)
+(gVisor netstack + параметры `jc/jmin/jmax/s1..s4/h1..h4/i1..i5`).
+Kernel-модуль `awg` не подходит: пробы работают непривилегированно
+(`--network=host`, uid 1000, без `/dev/net/tun` и без `NET_ADMIN`), а
+контейнер делит netns с хостом. gVisor даёт TCP/UDP/ICMP внутри
+процесса без единой capability.
+
+* `probe/awgproxy/main.go` — флаги `-config`, `-socks`, `-bind-device`;
+  резолвит `Endpoint` системным резолвером **до** `IpcSet`
+  (`amneziawg-go` принимает только IP-литерал, а AmneziaVPN отдаёт
+  домен), поднимает девайс и SOCKS5-сервер (только CONNECT).
+* `probe/awgproxy/bind_linux.go` — собственная реализация
+  `conn.Bind` с `SO_BINDTODEVICE`, потому что `StdNetBind` из
+  `amneziawg-go` создаёт сокеты внутри себя и не даёт задать
+  socket-опции. Используется только когда задан `-bind-device`.
+* `probe/awgproxy/uapi.go` — рендер конфигурации в UAPI; отсутствующие
+  необфусцирующие параметры не выводятся (пустое значение UAPI
+  отвергает как ошибку разбора).
+
+Ключи в `[Interface]` и `[Peer]` (`PrivateKey`, `PresharedKey`) — это
+секрет: конфиг на диске создаётся с `umask 0o077` и правами `0600`,
+в логи попадает только argv без секретов, `?link=` в URL не пишется.
+
+Проверка живым туннелем (нужен рабочий AWG-конфиг):
+
+```sh
+cd probe && uv sync
+uv run python - <<'PY'
+import json
+from xspeed_probe.awg import build_awg_helper_config, parse_awg_config
+cfg = parse_awg_config(open("/path/to/amnezia.conf").read())
+json.dump(build_awg_helper_config(cfg), open("/tmp/awg.json", "w"), indent=2)
+PY
+docker build -t xspeed-probe:local -f Dockerfile .
+docker run --rm --network=host --entrypoint /usr/local/bin/awgsocks \
+    -v /tmp/awg.json:/cfg/awg.json:ro \
+    xspeed-probe:local -config /cfg/awg.json -socks 127.0.0.1:1080
+curl -sS --socks5-hostname 127.0.0.1:1080 -o /dev/null -w '%{size_download}\n' \
+    'https://speed.cloudflare.com/__down?bytes=5000000'
+```
+
+Тесты хелпера: `cd probe/awgproxy && go test ./...`.
 
 ## Локальная разработка
 
@@ -108,7 +167,8 @@ ip -o link show usbphone0      # должен появиться USB-Ethernet
 ## Graceful shutdown
 
 `SIGTERM` / `SIGINT` отменяет текущий замер (если идёт), закрывает
-WebSocket и завершает все xray-процессы, порождённые этой пробой.
+WebSocket и завершает все процессы туннелей (xray и `awgsocks`),
+порождённые этой пробой.
 
 ## Переменные окружения
 
@@ -118,6 +178,10 @@ WebSocket и завершает все xray-процессы, порождённ
 | `PROBE_TOKEN`      | да                                                          | Bearer-токен для авторизации на сервере               |
 | `PROBE_ALIAS`      | нет                                                         | Человекочитаемое имя пробы                            |
 | `REGION_CODE`      | нет                                                         | Код региона (см. `regions.code` в БД)                 |
-| `NETWORK_INTERFACE`| нет                                                         | Исходящий NIC; проба резолвит его IPv4 (через SIOCGIFADDR) и кладёт в `sendThrough`. Пусто или интерфейс отсутствует — задача пропускается без ошибки; есть NIC, но без маршрутизируемого IPv4 — задача пропускается без ошибки. В обоих случаях серверный sweeper через 5 минут вернёт задачу в очередь. |
+| `NETWORK_INTERFACE`| нет                                                         | Исходящий NIC. Для vless проба резолвит его IPv4 (через SIOCGIFADDR) и кладёт в `sendThrough`; для AmneziaWG имя NIC уходит в `awgsocks -bind-device` (SO_BINDTODEVICE). Пусто или интерфейс отсутствует — задача пропускается без ошибки; есть NIC, но без маршрутизируемого IPv4 — задача пропускается без ошибки. В обоих случаях серверный sweeper через 5 минут вернёт задачу в очередь. |
 | `SPEEDTEST_URL`    | нет                                                         | URL для замера скорости                                |
+| `XRAY_CONFIG_DIR`  | нет (`/tmp`)                                               | Каталог для временных конфигов туннелей               |
+| `XRAY_READY_TIMEOUT` | нет (`10`)                                                 | Сколько ждать SOCKS-порт xray (секунды)                |
+| `AWGPROXY_BINARY`  | нет (`/usr/local/bin/awgsocks`)                            | Путь к userspace-хелперу AmneziaWG в образе пробы     |
+| `AWG_READY_TIMEOUT`| нет (`15`)                                                 | Сколько ждать SOCKS-порт awgsocks (секунды); handshake с сервером AWG добавляет один RTT к старту |
 | `LOG_LEVEL`        | нет (`INFO`)                                               | Уровень логирования                                   |

@@ -128,15 +128,16 @@ async def _drive(
 
 async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> None:
     _connect, sockets = fake_connect
-    handler_calls: list[tuple[int, str, str | None, str | None]] = []
+    handler_calls: list[tuple[int, str, str, str | None, str | None]] = []
 
     async def on_task(
         task_id: int,
         link: str,
-        destination_url: str | None,
+        protocol: str = "vless",
+        destination_url: str | None = None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
-        handler_calls.append((task_id, link, destination_url, probe_public_ip))
+        handler_calls.append((task_id, link, protocol, destination_url, probe_public_ip))
         return 12.5, None
 
     settings = _settings()
@@ -177,6 +178,7 @@ async def test_client_sends_online_then_result_on_task(fake_connect: Any) -> Non
         (
             7,
             "vless://x@example.com:443",
+            "vless",
             "https://speed.example.com/__down?bytes=100000000",
             "203.0.113.10",
         )
@@ -202,7 +204,8 @@ async def test_client_uses_destination_url_when_present(fake_connect: Any) -> No
     async def on_task(
         task_id: int,
         link: str,
-        destination_url: str | None,
+        protocol: str = "vless",
+        destination_url: str | None = None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         handler_calls.append(destination_url)
@@ -246,7 +249,8 @@ async def test_client_falls_back_when_destination_url_absent(fake_connect: Any) 
     async def on_task(
         task_id: int,
         link: str,
-        destination_url: str | None,
+        protocol: str = "vless",
+        destination_url: str | None = None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         handler_calls.append(destination_url)
@@ -294,7 +298,8 @@ async def test_client_skips_result_when_handler_returns_none(fake_connect: Any) 
     async def on_task(
         task_id: int,
         link: str,
-        destination_url: str | None,
+        protocol: str = "vless",
+        destination_url: str | None = None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         return None, None
@@ -335,7 +340,8 @@ async def test_client_ignores_unknown_message_types(fake_connect: Any) -> None:
     async def on_task(
         task_id: int,
         link: str,
-        destination_url: str | None,
+        protocol: str = "vless",
+        destination_url: str | None = None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         raise AssertionError("handler should not be called")
@@ -371,7 +377,8 @@ async def test_client_handler_exception_reports_handler_error(fake_connect: Any)
     async def on_task(
         task_id: int,
         link: str,
-        destination_url: str | None,
+        protocol: str = "vless",
+        destination_url: str | None = None,
         probe_public_ip: str | None = None,
     ) -> tuple[float | None, str | None]:
         raise RuntimeError("boom")

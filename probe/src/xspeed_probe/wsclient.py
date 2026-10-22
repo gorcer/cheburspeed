@@ -33,21 +33,26 @@ logger = logging.getLogger(__name__)
 
 
 TaskHandler = Callable[
-    [int, str, str | None, str | None],
+    [int, str, str, str | None, str | None],
     Awaitable[tuple[float | None, str | None]],
 ]
 """Callable invoked on every ``task.assigned`` envelope.
 
-It receives ``(task_id, link, destination_url, probe_public_ip)`` and
-returns ``(speed_mbps, error)``. ``destination_url`` is ``None`` when
-the task did not specify one — the handler should fall back to the
-configured default. ``probe_public_ip`` is the IP the server last
-saw for this probe and is ``None`` until the first online handshake
-completes.
+It receives ``(task_id, link, protocol, destination_url, probe_public_ip)``
+and returns ``(speed_mbps, error)``. ``protocol`` is ``"vless"`` or
+``"amneziawg"`` and tells the handler how to interpret ``link``; the
+client substitutes ``"vless"`` when the server omits the field so a
+server that predates AmneziaWG support stays usable.
+``destination_url`` is ``None`` when the task did not specify one — the
+handler should fall back to the configured default. ``probe_public_ip``
+is the IP the server last saw for this probe and is ``None`` until the
+first online handshake completes.
 
 Returning ``(None, None)`` is treated as success and the client will
 not send anything — useful for handlers that post results out-of-band.
 """
+
+DEFAULT_PROTOCOL = "vless"
 
 
 class ProbeClient:
@@ -199,18 +204,24 @@ class ProbeClient:
             destination_url: str | None = raw_destination
         else:
             destination_url = None
+        raw_protocol = payload.get("protocol")
+        if isinstance(raw_protocol, str) and raw_protocol:
+            protocol: str = raw_protocol
+        else:
+            protocol = DEFAULT_PROTOCOL
         raw_public_ip = payload.get("probe_public_ip")
         if isinstance(raw_public_ip, str) and raw_public_ip:
             probe_public_ip: str | None = raw_public_ip
         else:
             probe_public_ip = None
-        logger.info("received task %s", task_id)
+        logger.info("received task %s (protocol=%s)", task_id, protocol)
         speed_mbps: float | None = None
         error: str | None = None
         try:
             speed_mbps, error = await self._on_task(
                 task_id,
                 link,
+                protocol,
                 destination_url,
                 probe_public_ip,
             )
@@ -218,8 +229,8 @@ class ProbeClient:
             raise
         except TypeError:
             # Backward compatibility: handlers built against the
-            # 3-argument signature still work — drop the new arg.
-            speed_mbps, error = await self._on_task(task_id, link, destination_url)  # type: ignore[misc]
+            # 3-argument signature still work — drop the new args.
+            speed_mbps, error = await self._on_task(task_id, link, destination_url)  # type: ignore[arg-type, call-arg]
         except Exception as exc:  # noqa: BLE001
             logger.exception("task %s handler failed", task_id)
             error = f"handler_error: {exc}"
@@ -296,4 +307,11 @@ async def run_probe(
         await client.close()
 
 
-__all__ = ["ProbeClient", "TaskHandler", "run_probe", "InvalidStatus", "_additive_jitter"]
+__all__ = [
+    "DEFAULT_PROTOCOL",
+    "ProbeClient",
+    "TaskHandler",
+    "run_probe",
+    "InvalidStatus",
+    "_additive_jitter",
+]

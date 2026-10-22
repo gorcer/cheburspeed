@@ -41,6 +41,30 @@ VALID_LINK = (
     "?security=reality&sni=cdn.example.com&type=tcp#demo"
 )
 
+VALID_AWG_LINK = """[Interface]
+PrivateKey = cNx0N+nxLtxHhbHG1M1tM8pDvDNnOWGbkpHFrTnHqAA=
+Address = 10.8.40.106/32
+DNS = 1.1.1.1,1.0.0.1
+Jc = 3
+Jmin = 10
+Jmax = 50
+S1 = 150
+S2 = 224
+S3 = 0
+S4 = 0
+H1 = 1232863036
+H2 = 1441878557
+H3 = 636923766
+H4 = 214107436
+
+[Peer]
+PublicKey = fgI6VqMCIvjErRo2vL6XQhDqfBiK+FTxLBRLxMCCZVU=
+PresharedKey = pkcDjyh0jW8RFTLvhEEeMk4SPT7WUEPGyN/ZXGQE2Vk=
+Endpoint = in.oneyearsolution.com:40974
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+"""
+
 
 def _test_dsn() -> str:
     url = _test_database_url()
@@ -89,16 +113,18 @@ async def _insert_task(
     link: str,
     probe_tokens: list[str] | None = None,
     status: str = "pending",
+    protocol: str = "vless",
 ) -> int:
     conn = await asyncpg.connect(_test_dsn())
     try:
         row = await conn.fetchrow(
             """
-            INSERT INTO tasks (link, status, probe_tokens)
-            VALUES ($1, $2, $3::jsonb)
+            INSERT INTO tasks (link, protocol, status, probe_tokens)
+            VALUES ($1, $2, $3, $4::jsonb)
             RETURNING id
             """,
             link,
+            protocol,
             status,
             None if probe_tokens is None else json.dumps(probe_tokens),
         )
@@ -430,11 +456,13 @@ def test_claimed_task_is_a_dataclass_with_id_and_link() -> None:
     sample = ClaimedTask(
         id=1,
         link=VALID_LINK,
+        protocol="vless",
         destination_url=None,
         probe_public_ip="203.0.113.10",
     )
     assert sample.id == 1
     assert sample.link == VALID_LINK
+    assert sample.protocol == "vless"
     assert sample.destination_url is None
     assert sample.probe_public_ip == "203.0.113.10"
 
@@ -529,6 +557,104 @@ async def test_dispatch_to_probe_attaches_destination_url(app_db: Database) -> N
     assert message["destination_url"] == "https://speed.example.com/__down?bytes=100000000"
 
 
+async def test_claim_task_carries_protocol(app_db: Database) -> None:
+    """``claim_task`` surfaces the row's protocol so the probe can branch."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-proto", region_id)
+    await _insert_task(VALID_LINK)
+    awg_task = await _insert_task(VALID_AWG_LINK, protocol="amneziawg")
+
+    async with app_db.pool.acquire() as conn:
+        first = await claim_task(conn, probe_token="probe-proto")
+        second = await claim_task(conn, probe_token="probe-proto")
+
+    assert first is not None and first.protocol == "vless"
+    assert second is not None and second.id == awg_task
+    assert second.protocol == "amneziawg"
+    assert second.link == VALID_AWG_LINK
+
+
+async def test_dispatch_to_probe_sends_protocol(app_db: Database) -> None:
+    """The dispatched envelope carries the protocol of the claimed task."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-envelope", region_id)
+    await _insert_task(VALID_AWG_LINK, protocol="amneziawg")
+
+    hub = Hub()
+    captured: list[dict[str, Any]] = []
+
+    async def fake_send(token: str, message: dict[str, Any]) -> bool:
+        _ = token
+        captured.append(message)
+        return True
+
+    hub.send = fake_send  # type: ignore[method-assign]
+
+    async with app_db.pool.acquire():
+        dispatched = await dispatch_to_probe(app_db, hub, "probe-envelope")
+
+    assert dispatched is True
+    assert captured[0]["protocol"] == "amneziawg"
+
+
+async def test_dispatch_to_probe_defaults_to_vless_protocol(app_db: Database) -> None:
+    """Pre-AmneziaWG rows keep the ``vless`` default in the envelope."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-default", region_id)
+    await _insert_task(VALID_LINK)
+
+    hub = Hub()
+    captured: list[dict[str, Any]] = []
+
+    async def fake_send(token: str, message: dict[str, Any]) -> bool:
+        _ = token
+        captured.append(message)
+        return True
+
+    hub.send = fake_send  # type: ignore[method-assign]
+
+    async with app_db.pool.acquire():
+        await dispatch_to_probe(app_db, hub, "probe-default")
+
+    assert captured[0]["protocol"] == "vless"
+
+
+async def test_record_result_completes_task_for_unsupported_protocol(
+    app_db: Database,
+) -> None:
+    """An old probe that cannot dial AmneziaWG still finishes the task.
+
+    Such a probe reports ``xray_start_failed`` instead of a speed; the
+    task must reach a terminal state rather than stay ``running`` until
+    the sweeper recycles it forever.
+    """
+    region_id = await _seed_region()
+    probe_token = "probe-legacy"
+    probe_id = await _seed_probe(probe_token, region_id)
+    task_id = await _insert_task(VALID_AWG_LINK, protocol="amneziawg")
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token=probe_token)
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_id,
+            region_id=region_id,
+            speed_mbps=None,
+            error="xray_start_failed: not a vless URI",
+            raw={"error": "xray_start_failed"},
+        )
+        completed = await check_completion(conn, task_id)
+        row = await conn.fetchrow(
+            "SELECT status, completed_at FROM tasks WHERE id = $1",
+            task_id,
+        )
+
+    assert completed is True
+    assert row["status"] == "completed"
+    assert row["completed_at"] is not None
+
+
 __all__ = [
     "test_claim_task_returns_none_when_queue_is_empty",
     "test_claim_task_picks_oldest_pending_task",
@@ -545,4 +671,8 @@ __all__ = [
     "test_record_result_overwrites_existing_row_for_same_probe",
     "test_protocol_version_constant_matches_spec",
     "test_claimed_task_is_a_dataclass_with_id_and_link",
+    "test_claim_task_carries_protocol",
+    "test_dispatch_to_probe_sends_protocol",
+    "test_dispatch_to_probe_defaults_to_vless_protocol",
+    "test_record_result_completes_task_for_unsupported_protocol",
 ]

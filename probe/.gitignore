@@ -10,3 +10,9 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+
+# Go helper: `go build` in probe/awgproxy drops the binary next to the
+# sources. The image build writes to /out instead, so nothing here is
+# ever committed.
+awgproxy/awgsocks
+awgproxy/awgproxy

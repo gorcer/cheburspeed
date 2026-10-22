@@ -24,6 +24,15 @@ WS_CLOSE_INVALID_TOKEN: int = 4001
 
 WS_CLOSE_UPGRADE_REQUIRED: int = 4002
 
+TaskProtocol = Literal["vless", "amneziawg"]
+"""Tunnel protocols a task can carry.
+
+Kept here because this module is the single source of truth for the
+probe-facing contract: the HTTP API, the dispatcher and the
+``task.assigned`` envelope all branch on the same closed set, which
+mirrors the ``ck_tasks_protocol`` CHECK constraint in the database.
+"""
+
 
 class TaskAssignedMessage(BaseModel):
     """Envelope sent from the server to a probe to hand off a new task."""
@@ -32,7 +41,16 @@ class TaskAssignedMessage(BaseModel):
 
     type: Literal["task.assigned"] = "task.assigned"
     task_id: int = Field(..., ge=1)
-    link: str = Field(..., min_length=1, max_length=2048)
+    protocol: TaskProtocol = Field(
+        default="vless",
+        description=(
+            "Tunnel protocol carried by ``link``. Defaults to ``vless`` so a "
+            "server that predates AmneziaWG support stays readable by newer "
+            "probes; a probe that only knows ``vless`` never sees the new "
+            "value because it rejects anything but ``vless`` links."
+        ),
+    )
+    link: str = Field(..., min_length=1, max_length=8192)
     destination_url: str | None = Field(
         default=None,
         min_length=1,
@@ -118,6 +136,7 @@ __all__ = [
     "PROTOCOL_VERSION",
     "ResultMessage",
     "TaskAssignedMessage",
+    "TaskProtocol",
     "UnknownMessage",
     "WS_CLOSE_INVALID_TOKEN",
     "WS_CLOSE_UPGRADE_REQUIRED",

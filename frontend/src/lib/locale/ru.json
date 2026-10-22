@@ -1,7 +1,7 @@
 {
   "app": {
     "title": "CheburSpeed",
-    "subtitle": "Сервис мониторинга скорости VLESS-соединений"
+    "subtitle": "Сервис мониторинга скорости VLESS- и AmneziaWG-соединений"
   },
   "nav": {
     "home": "Главная",
@@ -10,9 +10,10 @@
     "language": "Язык"
   },
   "form": {
-    "title": "Проверить VLESS-ссылку",
-    "description": "Вставьте ссылку формата vless:// — ноды из регионов выполнят speedtest и обновят карту.",
+    "title": "Проверить соединение",
+    "description": "Вставьте ссылку формата vless:// или конфиг AmneziaWG — ноды из регионов выполнят speedtest и обновят карту.",
     "linkPlaceholder": "vless://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@host:443?...",
+    "linkLabel": "Ссылка vless://",
     "submit": "Запустить проверку",
     "submitting": "Отправляем…",
     "errorInvalid": "Ссылка должна начинаться с vless://",
@@ -20,7 +21,14 @@
     "destinationLabel": "Адрес проверки",
     "destinationPlaceholder": "— выберите —",
     "destinationEmpty": "Нет доступных адресов. Сначала добавьте их в админке.",
-    "destinationRequired": "Выберите адрес проверки"
+    "destinationRequired": "Выберите адрес проверки",
+    "protocolLabel": "Протокол",
+    "protocolVless": "VLESS",
+    "protocolAmneziawg": "AmneziaWG",
+    "awgLabel": "Конфиг AmneziaWG",
+    "awgPlaceholder": "[Interface]\nPrivateKey = …\nAddress = 10.8.40.106/32\n\n[Peer]\nPublicKey = …\nEndpoint = host:port\nAllowedIPs = 0.0.0.0/0",
+    "awgRequired": "Вставьте конфиг AmneziaWG",
+    "errorInvalidAwg": "Конфиг должен содержать секции [Interface] и [Peer]"
   },
   "map": {
     "title": "Карта регионов",
@@ -77,13 +85,13 @@
   },
   "docs": {
     "title": "Документация CheburSpeed",
-    "intro": "CheburSpeed — это сервис мониторинга скорости VLESS-соединений. Проба устанавливается на узле и через WebSocket получает задания, прогоняет speedtest через xray и возвращает результат на сервер.",
+    "intro": "CheburSpeed — это сервис мониторинга скорости VLESS- и AmneziaWG-соединений. Проба устанавливается на узле и через WebSocket получает задания, поднимает туннель (xray для VLESS, userspace-хелпер для AmneziaWG), прогоняет speedtest и возвращает результат на сервер.",
     "apiTitle": "HTTP API",
 
     "endpoints": {
       "createTask": {
         "title": "POST /api/v1/tasks",
-        "description": "Создать новое задание. Тело: { link, destination_id, probe_tokens? }."
+        "description": "Создать новое задание. Тело: { link, protocol, destination_id, probe_tokens? }. protocol — vless (по умолчанию) или amneziawg; link — vless:// URI либо INI-конфиг AmneziaWG."
       },
       "getTask": {
         "title": "GET /api/v1/tasks/{id}",
@@ -116,8 +124,8 @@
         "response": "Ответ"
       },
       "createTask": {
-        "request": "curl -X POST https://che.dataforest.app/api/v1/tasks \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"link\": \"vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\",\n    \"destination_id\": 2,\n    \"probe_tokens\": null\n  }'",
-        "response": "{\n  \"id\": 599,\n  \"status\": \"pending\",\n  \"destination_id\": 2,\n  \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\"\n}",
+        "request": "curl -X POST https://che.dataforest.app/api/v1/tasks \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    \"protocol\": \"vless\",\n    \"link\": \"vless://11111111-2222-3333-4444-555555555555@node.example.com:443?type=ws&security=tls#demo\",\n    \"destination_id\": 2,\n    \"probe_tokens\": null\n  }'",
+        "response": "{\n  \"id\": 599,\n  \"status\": \"pending\",\n  \"protocol\": \"vless\",\n  \"destination_id\": 2,\n  \"destination_url\": \"https://dataforest.app/speed-test-20mb.bin\"\n}",
         "status": "HTTP/1.1 201 Created"
       },
       "getTask": {

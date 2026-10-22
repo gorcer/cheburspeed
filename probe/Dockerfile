@@ -19,6 +19,26 @@
 ARG XRAY_VERSION=26.10.17
 FROM --platform=$BUILDPLATFORM teddysun/xray:${XRAY_VERSION} AS xray
 
+# Stage 1b: awgsocks — AmneziaWG userspace helper -----------------------
+# Built for the image's own platform from the BUILDPLATFORM builder, so
+# one `docker buildx build --platform=linux/amd64,linux/arm64` produces
+# the right binary for every target.
+#
+# The probe image is multi-arch, so the Go toolchain must be able to
+# cross-compile; CGO is off because nothing here needs cgo and a static
+# binary drops cleanly into the slim runtime stage.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS awgsocks
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+# Dependencies first so a source-only change does not re-download the
+# gVisor tree on every build.
+COPY awgproxy/go.mod awgproxy/go.sum ./
+RUN go mod download
+COPY awgproxy/ ./
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/awgsocks .
+
 # Stage 2: Python probe -------------------------------------------------
 # Targets the architecture the image will run on. We copy the xray
 # binary out of stage 1 so the final image only contains what the probe
@@ -42,6 +62,9 @@ RUN apt-get update \
 # /usr/bin/xray so the kernel/VFS will pick the right one once the
 # image is extracted on the target.
 COPY --from=xray /usr/bin/xray /usr/local/bin/xray
+# AmneziaWG tasks have no xray equivalent: awgsocks runs the tunnel in
+# userspace (gVisor netstack) and publishes it on the same SOCKS5 port.
+COPY --from=awgsocks /out/awgsocks /usr/local/bin/awgsocks
 
 COPY pyproject.toml ./
 COPY src ./src
