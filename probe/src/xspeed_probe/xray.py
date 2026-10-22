@@ -49,6 +49,7 @@ def _purge_orphan_configs(config_dir: Path) -> None:
 def _reap_xray(
     proc: subprocess.Popen[bytes],
     stderr_handle: Any,
+    stderr_path: Path,
     task_id: int,
 ) -> None:
     """Wait for ``proc`` to exit, escalating to ``SIGKILL`` if needed.
@@ -57,6 +58,10 @@ def _reap_xray(
     while xray tears down. Closes the stderr capture file and
     removes its on-disk copy after the process has actually exited,
     so we never yank the file from under a still-running writer.
+
+    The log path is passed in explicitly: a file object built by
+    :func:`os.fdopen` reports the raw descriptor as its ``name``, so
+    ``Path(handle.name)`` raises instead of unlinking the log.
     """
     try:
         proc.wait(timeout=5.0)
@@ -75,12 +80,10 @@ def _reap_xray(
             stderr_handle.close()
         except OSError:
             logger.exception("failed to close xray stderr log (task=%s)", task_id)
-        path = getattr(stderr_handle, "name", None)
-        if path:
-            try:
-                Path(path).unlink(missing_ok=True)
-            except OSError:
-                logger.exception("failed to remove %s", path)
+    try:
+        stderr_path.unlink(missing_ok=True)
+    except OSError:
+        logger.exception("failed to remove %s", stderr_path)
 
 
 class VlessUriError(ValueError):
@@ -476,11 +479,12 @@ class XrayManager:
         """
         proc = self._processes.pop(task_id, None)
         stderr_handle = self._stderr_files.pop(task_id, None)
+        stderr_path = self._stderr_logs.pop(task_id, None)
         if proc is not None and proc.poll() is None:
             proc.terminate()
             threading.Thread(
                 target=_reap_xray,
-                args=(proc, stderr_handle, task_id),
+                args=(proc, stderr_handle, stderr_path, task_id),
                 daemon=True,
                 name=f"xspeed-reap-{task_id}",
             ).start()
@@ -489,13 +493,17 @@ class XrayManager:
                 stderr_handle.close()
             except OSError:
                 logger.exception("failed to close xray stderr log (task=%s)", task_id)
+            if stderr_path is not None:
+                try:
+                    stderr_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.exception("failed to remove %s", stderr_path)
         config_path = self._configs.pop(task_id, None)
         if config_path is not None:
             try:
                 config_path.unlink(missing_ok=True)
             except OSError:
                 logger.exception("failed to remove %s", config_path)
-        self._stderr_logs.pop(task_id, None)
 
     def terminate_all(self) -> None:
         """Stop every xray started through this manager."""
