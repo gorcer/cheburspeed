@@ -30,6 +30,7 @@
   }
 
   function speedToneClass(entry: HistoryEntry): string {
+    if (entry.error) return "text-danger";
     if (entry.speedMbps === null) return "text-surface-content/60";
     if (entry.speedMbps < 5) return "text-danger";
     if (entry.speedMbps < 20) return "text-warning";
@@ -51,6 +52,7 @@
       probeId: result.probe_id,
       probeAlias: result.probe_alias,
       speedMbps: result.speed_mbps,
+      error: result.error,
       destName,
       destAddress,
       createdAt: result.created_at,
@@ -116,6 +118,7 @@
               >{t("history.columns.probeName")}</th
             >
             <th class="px-3 py-2 font-medium">{t("history.columns.speed")}</th>
+            <th class="px-3 py-2 font-medium">{t("history.columns.error")}</th>
             <th class="px-3 py-2 font-medium">{t("history.columns.dest")}</th>
             <th class="px-3 py-2 font-medium">{t("history.columns.address")}</th
             >
@@ -134,6 +137,7 @@
               <td class={`px-3 py-2 font-mono ${speedToneClass(entry)}`}>
                 {speedCell(entry)}
               </td>
+              <td class="px-3 py-2 text-danger/80">{entry.error ?? "—"}</td>
               <td class="px-3 py-2 text-surface-content/70">{entry.destName}</td
               >
               <td class="px-3 py-2 font-mono text-surface-content/70"

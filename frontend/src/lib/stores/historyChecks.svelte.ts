@@ -3,6 +3,7 @@ export interface HistoryEntry {
   probeId: number;
   probeAlias: string;
   speedMbps: number | null;
+  error: string | null;
   destName: string;
   destAddress: string;
   createdAt: string;
