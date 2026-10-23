@@ -200,24 +200,54 @@ ssh "$REMOTE_HOST" "
 # ---- 5. migrations ----------------------------------------------------
 if [[ "$MIGRATE" -eq 1 ]]; then
     say "3. alembic upgrade head"
-    DB_URL=$(grep '^DATABASE_URL=' "$LOCAL_DIR/$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
-    [[ -z "$DB_URL" ]] && DB_URL=$(grep '^DATABASE_URL=' "$LOCAL_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
-    if [[ -z "$DB_URL" ]]; then
-        warn "DATABASE_URL not present in local .env / .env.prod — migrations will rely on .env.prod on remote"
-    else
-        echo "   using DATABASE_URL from local env (postgres creds from remote .env.prod override at runtime)"
-    fi
 
+    # DATABASE_URL must be assembled on the remote from POSTGRES_*.
+    #
+    # .env.prod deliberately carries only POSTGRES_{USER,PASSWORD,DB} —
+    # DATABASE_URL there is composed by docker-compose, not stored in the
+    # file. Sourcing .env.prod therefore leaves $DATABASE_URL empty, the
+    # throwaway container falls back to the localhost URL hardcoded in
+    # alembic.ini, and the migration dies on "password authentication
+    # failed" — leaving the new server image talking to a schema that
+    # never got the new column (DAT-487: every POST/GET /tasks returned
+    # 500 with UndefinedColumnError).
+    #
+    # 127.0.0.1 is correct here: this container runs with --network=host,
+    # so it shares the host namespace and reaches the published postgres
+    # port directly. The compose service name would not resolve.
     ssh "$REMOTE_HOST" "
         set -euo pipefail
         cd $REMOTE_DIR
         set -a; . ./\$ENV_FILE; set +a
+
+        : \"\${POSTGRES_USER:?POSTGRES_USER missing from $ENV_FILE}\"
+        : \"\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing from $ENV_FILE}\"
+        : \"\${POSTGRES_DB:?POSTGRES_DB missing from $ENV_FILE}\"
+
+        export DATABASE_URL=\"postgresql+asyncpg://\$POSTGRES_USER:\$POSTGRES_PASSWORD@127.0.0.1:5432/\$POSTGRES_DB\"
+
         docker run --rm --network=host \\
             --env-file $ENV_FILE \\
             --env DATABASE_URL=\"\$DATABASE_URL\" \\
             -v $REMOTE_DIR/server/alembic.ini:/app/alembic.ini \\
             -v $REMOTE_DIR/server/alembic:/app/alembic \\
             cheburspeed-server sh -c '/app/.venv/bin/alembic upgrade head'
+
+        # Fail the deploy when the container image still runs an older
+        # revision than the tree it was just built from — the failure mode
+        # above otherwise surfaces only as 500s in production.
+        HEAD_REV=\$(docker run --rm \\
+            --env-file $ENV_FILE \\
+            --env DATABASE_URL=\"\$DATABASE_URL\" \\
+            -v $REMOTE_DIR/server/alembic.ini:/app/alembic.ini \\
+            -v $REMOTE_DIR/server/alembic:/app/alembic \\
+            cheburspeed-server sh -c '/app/.venv/bin/alembic heads' | tail -1 | awk '{print \$1}')
+        CURRENT_REV=\$(docker exec cheburspeed-server alembic current 2>/dev/null | tail -1 | awk '{print \$1}')
+        if [[ -n \"\$HEAD_REV\" && \"\$CURRENT_REV\" != \"\$HEAD_REV\" ]]; then
+            echo \"FATAL: alembic is at '\$CURRENT_REV' but the tree is at '\$HEAD_REV'\" >&2
+            exit 1
+        fi
+        echo \"   alembic at \$CURRENT_REV (head \$HEAD_REV)\"
     "
 else
     say "3. migrations skipped (--no-migrate)"
