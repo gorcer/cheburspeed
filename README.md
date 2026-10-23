@@ -243,13 +243,14 @@ WebSocket-хэндшейк будет отклонён с HTTP 403.
 `PROBE_ALIAS`, `PROBE_SERVER_URL`, `PROBE_SPEEDTEST_URL`).
 
 ```sh
-./probe.sh create    # build образа (если нужно) + новый контейнер
-./probe.sh start     # поднять уже созданный, но остановленный контейнер
-./probe.sh status    # docker ps + последние логи + серверная регистрация
-./probe.sh stop      # остановить контейнер (НЕ удалять; revives через start)
-./probe.sh restart   # docker restart (stop + start, без пересборки образа)
-./probe.sh remove    # удалить контейнер (заменяет старое «деструктивное stop»)
-./probe.sh logs [N]  # `docker logs --tail N -f`
+./probe.sh create        # build образа (если нужно) + новый контейнер
+./probe.sh start         # поднять уже созданный, но остановленный контейнер
+./probe.sh status        # docker ps + последние логи + серверная регистрация
+./probe.sh stop          # остановить контейнер (НЕ удалять; revives через start)
+./probe.sh restart       # docker restart (stop + start, без пересборки образа)
+./probe.sh remove        # удалить контейнер (заменяет старое «деструктивное stop»)
+./probe.sh update-all    # пересобрать образ один раз и перезапустить ВСЕ пробы
+./probe.sh logs [N]      # `docker logs --tail N -f`
 ```
 
 Семантика `stop` / `start` / `remove` совпадает с plain docker:
@@ -259,7 +260,7 @@ WebSocket-хэндшейк будет отклонён с HTTP 403.
 повторный запуск снимает существующий контейнер с тем же именем
 и поднимает новый.
 
-`create` поддерживает два флага:
+`create` и `update-all` поддерживают два флага:
 
 - `--no-build` — пропустить `docker build`, даже если образ
   отсутствует локально (полезно, если образ уже подтянут из
@@ -275,6 +276,40 @@ WebSocket-хэндшейк будет отклонён с HTTP 403.
 
 Имя контейнера по умолчанию `xspeed-probe-${PROBE_REGION,,}`;
 переопределяется через `PROBE_CONTAINER` в `.env`.
+
+#### Несколько проб на одной машине (`update-all`)
+
+Каждая проба папки описывается своим файлом: `.env` — проводная
+проба, `.env.<имя>` — ещё одна (например `.env.mobile` для
+USB-модема, см. раздел ниже). Эти файлы одинаковы по структуре и
+содержат те же `PROBE_*` переменные, включая `PROBE_CONTAINER` и
+свой `PROBE_TOKEN`.
+
+```sh
+./probe.sh update-all          # образ пересобирается один раз,
+                               # затем каждый контейнер пересоздаётся
+                               # из своего конфига
+./probe.sh --env-file .env.mobile status   # одна конкретная проба
+./probe.sh --env-file .env.mobile create   # ... пересоздать только её
+```
+
+`update-all` находит `.env` плюс все соседние `.env.<имя>`
+(шаблоны `.env.*.example`, `.env.prod` и per-machine `.env.local`
+пропускаются) и для каждого вызывает `create --no-build`: все пробы
+идут на один и тот же локальный образ `PROBE_IMAGE`
+(по умолчанию `xspeed-probe:dev`), поэтому образ собирается один раз.
+Если отдельная проба не поднялась, остальные всё равно обновляются,
+а код возврата в конце будет ненулевым.
+
+Флаг `--env-file` берёт конфиг как единственный источник значений:
+унаследованные из окружения `PROBE_*` перед его загрузкой
+сбрасываются, поэтому `.env.mobile` никогда не подхватит токен
+проводной пробы. Прежний способ `set -a; . .env.mobile; set +a;
+./probe.sh create` продолжает работать.
+
+Шаг 4 скрипта `./update.sh` вызывает `./probe.sh update-all`, так
+что `./update.sh` обновляет сервер и **все** пробы машины; отключить
+шаг целиком можно через `PROBE_SKIP=1 ./update.sh`.
 
 ### Запуск из исходников (dev)
 
@@ -329,15 +364,17 @@ xray действительно пинит NIC, а не идёт через defa
    `POST /api/v1/admin/probes` с `alias="primorje-mobile"` и
    `region_id=<PK>`. Сервер не ограничивает количество проб на
    регион.
-3. Скопируйте токен в `.env` второй пробы и задайте:
+3. Скопируйте токен в `.env.mobile` рядом с `.env` и задайте:
    ```
    PROBE_CONTAINER=xspeed-probe-mobile
    PROBE_ALIAS=primorje-mobile
    PROBE_REGION=PK
    PROBE_NETWORK_INTERFACE=usbphone0
    ```
-4. `./probe.sh create` — проба стартует параллельно первой; обе
-   видны в `/admin/probes` со свежими `last_seen_at`.
+4. `./probe.sh --env-file .env.mobile create` — проба стартует
+   параллельно первой; обе видны в `/admin/probes` со свежими
+   `last_seen_at`. Дальше обе обновляются одним
+   `./probe.sh update-all` (или `./update.sh`).
 
 ## Документация API
 

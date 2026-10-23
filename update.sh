@@ -4,13 +4,13 @@
 #   1. git pull --ff-only origin dev (with auto-stash of local edits)
 #   2. docker compose up -d --build  (server, frontend, nginx)
 #   3. alembic upgrade head          (idempotent)
-#   4. probe image rebuild + container restart (if PROBE_* env vars set)
+#   4. probe image rebuild + recreate of every probe of this folder
+#      (`.env` + sibling `.env.<name>` — see ./probe.sh update-all)
 #   5. health check + status summary
 #
 # Usage:
 #   ./update.sh
 #   PROBE_SKIP=1 ./update.sh            # skip probe step
-#   PROBE_REGION=SP ./update.sh         # override region
 #
 # Safe to re-run. Idempotent.
 
@@ -20,7 +20,6 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 
 COMPOSE=(docker compose)
-PROBE_IMAGE="xspeed-probe:dev"
 PROBE_SKIP="${PROBE_SKIP:-0}"
 
 # ---- pretty output -------------------------------------------------------
@@ -122,7 +121,9 @@ done
 say "3. alembic upgrade head"
 "${COMPOSE[@]}" exec -T server alembic upgrade head
 
-# ---- 4. probe (optional) -------------------------------------------------
+# ---- 4. probes (optional) -------------------------------------------------
+# One build, then every probe declared in this folder: `.env` (wired) and
+# each sibling `.env.<name>` (e.g. `.env.mobile`, DAT-461). See probe.sh.
 if [[ "$PROBE_SKIP" == "1" ]]; then
     say "4. probe step skipped (PROBE_SKIP=1)"
 elif [[ -f .env ]]; then
@@ -131,36 +132,8 @@ elif [[ -f .env ]]; then
     if [[ -z "${PROBE_TOKEN:-}" ]]; then
         warn "PROBE_TOKEN not set in .env — skipping probe step"
     else
-        say "4. probe (region=${PROBE_REGION:-PK})"
-        PROBE_REGION="${PROBE_REGION:-PK}"
-        PROBE_ALIAS="${PROBE_ALIAS:-$PROBE_REGION}"
-        PROBE_SERVER_URL="${PROBE_SERVER_URL:-ws://localhost:8001/ws}"
-        PROBE_SPEEDTEST_URL="${PROBE_SPEEDTEST_URL:-https://speed.cloudflare.com/__down?bytes=10000000}"
-        CONTAINER_NAME="xspeed-probe-${PROBE_REGION,,}"
-
-        docker build -t "$PROBE_IMAGE" -f probe/Dockerfile probe/
-        docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-        # Forward ``PROBE_NETWORK_INTERFACE`` (DAT-461) when set so the
-        # probe pins xray's vless outbound to the named interface's
-        # IPv4. The variable is omitted entirely when empty to keep
-        # the legacy behaviour (kernel default route).
-        netif_args=()
-        if [[ -n "${PROBE_NETWORK_INTERFACE:-}" ]]; then
-            netif_args=(-e NETWORK_INTERFACE="$PROBE_NETWORK_INTERFACE")
-        fi
-        docker run -d \
-            --name "$CONTAINER_NAME" \
-            --network=host \
-            --restart unless-stopped \
-            -e SERVER_URL="$PROBE_SERVER_URL" \
-            -e PROBE_TOKEN="$PROBE_TOKEN" \
-            -e PROBE_ALIAS="$PROBE_ALIAS" \
-            -e REGION_CODE="$PROBE_REGION" \
-            -e SPEEDTEST_URL="$PROBE_SPEEDTEST_URL" \
-            -e LOG_LEVEL="${LOG_LEVEL:-INFO}" \
-            "${netif_args[@]}" \
-            "$PROBE_IMAGE"
-        echo "   started $CONTAINER_NAME"
+        say "4. probes (${PROBE_REGION:-PK}) — ./probe.sh update-all"
+        ./probe.sh update-all
     fi
 else
     warn ".env not found — skipping probe step"
