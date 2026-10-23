@@ -41,9 +41,7 @@ def test_match_when_destination_resolves_to_self_ip() -> None:
         "xspeed_probe.main.socket.getaddrinfo",
         side_effect=fake_getaddrinfo,
     ):
-        assert (
-            _destination_targets_self_ip("https://self.example.com/__down", fake_ip) is True
-        )
+        assert _destination_targets_self_ip("https://self.example.com/__down", fake_ip) is True
 
 
 def test_no_match_when_destination_resolves_to_other_ip() -> None:
@@ -61,10 +59,7 @@ def test_no_match_when_destination_resolves_to_other_ip() -> None:
 
 
 def test_no_match_when_own_ip_string_is_malformed() -> None:
-    assert (
-        _destination_targets_self_ip("https://speed.example.com/__down", "not-an-ip")
-        is False
-    )
+    assert _destination_targets_self_ip("https://speed.example.com/__down", "not-an-ip") is False
 
 
 __all__ = [

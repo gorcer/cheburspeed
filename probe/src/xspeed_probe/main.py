@@ -145,8 +145,7 @@ async def _run_task(
             return None, None
         except InterfaceNoIpError as exc:
             logger.warning(
-                "task %s: NETWORK_INTERFACE=%r has no routable IPv4 (%s); "
-                "skipping task silently",
+                "task %s: NETWORK_INTERFACE=%r has no routable IPv4 (%s); skipping task silently",
                 task_id,
                 settings.network_interface,
                 exc,
