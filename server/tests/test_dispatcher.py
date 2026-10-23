@@ -10,7 +10,11 @@ These cover the four contracts the dispatcher must honour:
 * :func:`check_completion` resets multi-probe tasks to ``pending``
   until every distinct probe in the whitelist has reported,
 * :func:`sweep_stale_running_tasks` revives ``running`` tasks that
-  never produced a result inside the staleness window.
+  never produced a result inside the staleness window, and records the
+  silent probe as ``probe_timeout`` so the last missing result cannot
+  strand a partially measured task,
+* :func:`expire_incomplete_tasks` fails tasks that nobody finished
+  within :data:`TASK_TTL_SECONDS` so consumers stop waiting on them.
 """
 
 from __future__ import annotations
@@ -23,11 +27,14 @@ import pytest
 
 from xspeed_server.app.db import Database
 from xspeed_server.app.ws.dispatcher import (
+    PROBE_TIMEOUT_ERROR,
     STALE_RUNNING_AFTER_SECONDS,
+    TASK_TTL_SECONDS,
     ClaimedTask,
     check_completion,
     claim_task,
     dispatch_to_probe,
+    expire_incomplete_tasks,
     record_result,
     sweep_stale_running_tasks,
 )
@@ -137,6 +144,48 @@ async def _insert_task(
 async def app_db(app_instance: Any) -> Database:
     """Return the :class:`Database` instance attached to the test app."""
     return app_instance.state.db  # type: ignore[no-any-return]
+
+
+async def _age_task(
+    task_id: int,
+    *,
+    started_at_seconds: int | None = None,
+    created_at_seconds: int | None = None,
+) -> None:
+    """Backdate ``tasks`` timestamps so the sweeper treats it as stale."""
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        if started_at_seconds is not None:
+            await conn.execute(
+                """
+                UPDATE tasks
+                SET started_at = now() - ($1 || ' seconds')::interval
+                WHERE id = $2
+                """,
+                str(started_at_seconds),
+                task_id,
+            )
+        if created_at_seconds is not None:
+            await conn.execute(
+                """
+                UPDATE tasks
+                SET created_at = now() - ($1 || ' seconds')::interval
+                WHERE id = $2
+                """,
+                str(created_at_seconds),
+                task_id,
+            )
+    finally:
+        await conn.close()
+
+
+async def _forget_probe(token: str) -> None:
+    """Delete a probe row the way the admin API does when one is removed."""
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        await conn.execute("DELETE FROM probes WHERE token = $1", token)
+    finally:
+        await conn.close()
 
 
 async def test_claim_task_returns_none_when_queue_is_empty(app_db: Database) -> None:
@@ -404,6 +453,271 @@ async def test_sweep_leaves_recent_running_tasks_alone(app_db: Database) -> None
     assert row["assigned_to"] == "probe-fresh"
 
 
+async def test_sweep_completes_partially_measured_task_on_probe_timeout(
+    app_db: Database,
+) -> None:
+    """The silent last probe is replaced by a ``probe_timeout`` result row.
+
+    Two of three probes reported before the task went ``running`` on the
+    third one; that result never reached the server. The sweeper must
+    write the missing third result and complete the task instead of
+    leaving it ``running`` forever.
+    """
+    region_id = await _seed_region()
+    probe_a = await _seed_probe("probe-a", region_id)
+    probe_b = await _seed_probe("probe-b", region_id)
+    probe_c = await _seed_probe("probe-c", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token="probe-a")
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_a,
+            region_id=region_id,
+            speed_mbps=8.0,
+            error=None,
+            raw={},
+        )
+        assert await check_completion(conn, task_id) is False
+        await claim_task(conn, probe_token="probe-b")
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_b,
+            region_id=region_id,
+            speed_mbps=12.0,
+            error=None,
+            raw={},
+        )
+        assert await check_completion(conn, task_id) is False
+        claimed_c = await claim_task(conn, probe_token="probe-c")
+    assert claimed_c is not None and claimed_c.id == task_id
+
+    await _age_task(task_id, started_at_seconds=STALE_RUNNING_AFTER_SECONDS + 60)
+
+    swept = await sweep_stale_running_tasks(app_db)
+    assert swept >= 1
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        task_row = await conn.fetchrow(
+            "SELECT status, assigned_to, started_at FROM tasks WHERE id = $1", task_id
+        )
+        timeout_row = await conn.fetchrow(
+            """
+            SELECT speed_mbps, error, region_id
+            FROM task_results
+            WHERE task_id = $1 AND probe_id = $2
+            """,
+            task_id,
+            probe_c,
+        )
+    finally:
+        await conn.close()
+
+    assert task_row["status"] == "completed"
+    assert task_row["assigned_to"] is None
+    assert task_row["started_at"] is None
+    assert timeout_row is not None
+    assert timeout_row["error"] == PROBE_TIMEOUT_ERROR
+    assert timeout_row["speed_mbps"] is None
+    assert timeout_row["region_id"] == region_id
+
+
+async def test_sweep_returns_task_to_queue_when_other_probes_are_missing(
+    app_db: Database,
+) -> None:
+    """A timeout is one result, not the whole task — the rest still run."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-a", region_id)
+    await _seed_probe("probe-b", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-a")
+    assert claimed is not None and claimed.id == task_id
+
+    await _age_task(task_id, started_at_seconds=STALE_RUNNING_AFTER_SECONDS + 60)
+
+    swept = await sweep_stale_running_tasks(app_db)
+    assert swept >= 1
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            "SELECT status, assigned_to, started_at FROM tasks WHERE id = $1", task_id
+        )
+    finally:
+        await conn.close()
+    assert row["status"] == "pending"
+    assert row["assigned_to"] is None
+    assert row["started_at"] is None
+
+    async with app_db.pool.acquire() as conn:
+        claimed_b = await claim_task(conn, probe_token="probe-b")
+    assert claimed_b is not None and claimed_b.id == task_id
+
+
+async def test_sweep_does_not_overwrite_a_measurement_with_a_timeout(
+    app_db: Database,
+) -> None:
+    """A result that raced the sweeper survives it."""
+    region_id = await _seed_region()
+    probe_a = await _seed_probe("probe-a", region_id)
+    await _seed_probe("probe-b", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-a")
+        assert claimed is not None
+        await record_result(
+            conn,
+            task_id=task_id,
+            probe_id=probe_a,
+            region_id=region_id,
+            speed_mbps=42.0,
+            error=None,
+            raw={},
+        )
+
+    await _age_task(task_id, started_at_seconds=STALE_RUNNING_AFTER_SECONDS + 60)
+
+    await sweep_stale_running_tasks(app_db)
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow(
+            "SELECT speed_mbps, error FROM task_results WHERE task_id = $1 AND probe_id = $2",
+            task_id,
+            probe_a,
+        )
+    finally:
+        await conn.close()
+    assert row["speed_mbps"] == pytest.approx(42.0)
+    assert row["error"] is None
+
+
+async def test_sweep_resets_task_whose_probe_no_longer_exists(app_db: Database) -> None:
+    """A deleted probe token cannot hold a task hostage.
+
+    ``task_results.probe_id`` is a foreign key, so no timeout row can be
+    written for a probe that is gone; the task still has to go back to
+    the queue for the remaining probes.
+    """
+    region_id = await _seed_region()
+    await _seed_probe("probe-a", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-a")
+    assert claimed is not None and claimed.id == task_id
+    await _forget_probe("probe-a")
+
+    await _age_task(task_id, started_at_seconds=STALE_RUNNING_AFTER_SECONDS + 60)
+
+    swept = await sweep_stale_running_tasks(app_db)
+    assert swept >= 1
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow("SELECT status, assigned_to FROM tasks WHERE id = $1", task_id)
+    finally:
+        await conn.close()
+    assert row["status"] == "pending"
+    assert row["assigned_to"] is None
+
+
+async def test_probe_cannot_reclaim_a_task_it_timed_out_on(app_db: Database) -> None:
+    """The timeout row keeps the silent probe out of the task for good."""
+    region_id = await _seed_region()
+    probe_a = await _seed_probe("probe-a", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        claimed = await claim_task(conn, probe_token="probe-a")
+        assert claimed is not None
+    await _age_task(task_id, started_at_seconds=STALE_RUNNING_AFTER_SECONDS + 60)
+    await sweep_stale_running_tasks(app_db)
+
+    async with app_db.pool.acquire() as conn:
+        assert await claim_task(conn, probe_token="probe-a") is None
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        rows = await conn.fetch(
+            "SELECT error FROM task_results WHERE task_id = $1 AND probe_id = $2",
+            task_id,
+            probe_a,
+        )
+    finally:
+        await conn.close()
+    assert [row["error"] for row in rows] == [PROBE_TIMEOUT_ERROR]
+
+
+async def test_expire_fails_task_older_than_ttl(app_db: Database) -> None:
+    """A task nobody finished becomes ``failed`` with ``completed_at``."""
+    stale_task = await _insert_task(VALID_LINK)
+    fresh_task = await _insert_task(VALID_LINK)
+    await _age_task(stale_task, created_at_seconds=TASK_TTL_SECONDS + 60)
+
+    expired = await expire_incomplete_tasks(app_db)
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        stale_row = await conn.fetchrow(
+            "SELECT status, completed_at FROM tasks WHERE id = $1", stale_task
+        )
+        fresh_row = await conn.fetchrow(
+            "SELECT status, completed_at FROM tasks WHERE id = $1", fresh_task
+        )
+    finally:
+        await conn.close()
+
+    assert expired == 1
+    assert stale_row["status"] == "failed"
+    assert stale_row["completed_at"] is not None
+    assert fresh_row["status"] == "pending"
+    assert fresh_row["completed_at"] is None
+
+
+async def test_expire_leaves_running_task_being_measured(app_db: Database) -> None:
+    """A task claimed after a long wait keeps its in-flight measurement."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-slow", region_id)
+    task_id = await _insert_task(VALID_LINK)
+
+    async with app_db.pool.acquire() as conn:
+        await claim_task(conn, probe_token="probe-slow")
+    await _age_task(task_id, created_at_seconds=TASK_TTL_SECONDS + 60)
+
+    expired = await expire_incomplete_tasks(app_db)
+
+    conn = await asyncpg.connect(_test_dsn())
+    try:
+        row = await conn.fetchrow("SELECT status, assigned_to FROM tasks WHERE id = $1", task_id)
+    finally:
+        await conn.close()
+
+    assert expired == 0
+    assert row["status"] == "running"
+    assert row["assigned_to"] == "probe-slow"
+
+
+async def test_expired_task_is_never_dispatched_again(app_db: Database) -> None:
+    """``failed`` is terminal: the queue hands it out no more."""
+    region_id = await _seed_region()
+    await _seed_probe("probe-expired", region_id)
+    task_id = await _insert_task(VALID_LINK)
+    await _age_task(task_id, created_at_seconds=TASK_TTL_SECONDS + 60)
+
+    assert await expire_incomplete_tasks(app_db) == 1
+
+    async with app_db.pool.acquire() as conn:
+        assert await claim_task(conn, probe_token="probe-expired") is None
+
+
 async def test_record_result_overwrites_existing_row_for_same_probe(
     app_db: Database,
 ) -> None:
@@ -668,6 +982,14 @@ __all__ = [
     "test_check_completion_resets_multi_probe_task_to_pending",
     "test_sweep_resets_stale_running_tasks",
     "test_sweep_leaves_recent_running_tasks_alone",
+    "test_sweep_completes_partially_measured_task_on_probe_timeout",
+    "test_sweep_returns_task_to_queue_when_other_probes_are_missing",
+    "test_sweep_does_not_overwrite_a_measurement_with_a_timeout",
+    "test_sweep_resets_task_whose_probe_no_longer_exists",
+    "test_probe_cannot_reclaim_a_task_it_timed_out_on",
+    "test_expire_fails_task_older_than_ttl",
+    "test_expire_leaves_running_task_being_measured",
+    "test_expired_task_is_never_dispatched_again",
     "test_record_result_overwrites_existing_row_for_same_probe",
     "test_protocol_version_constant_matches_spec",
     "test_claimed_task_is_a_dataclass_with_id_and_link",

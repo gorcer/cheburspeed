@@ -304,7 +304,13 @@ make probe-run        # uv run xspeed-probe
 если переменная задана, но интерфейс отсутствует либо есть, но без
 маршрутизируемого IPv4 (например, до получения DHCP-lease), проба
 логирует warning и молча пропускает задание — серверный sweeper
-через 5 минут вернёт её в очередь. IPv4 резолвится на каждый замер
+через 5 минут вернёт её в очередь, записав молчание пробы как
+`probe_timeout` в `task_results` по этой задаче: одна выдача задачи
+всегда даёт ровно один результат, либо замер, либо терминальный
+таймаут. Если задачу так и не удалось завершить за 15 минут
+(`TASK_TTL_SECONDS`), она переходит в терминальный статус `failed` —
+клиент, опрашивающий `GET /api/v1/tasks/{id}`, получает ответ вместо
+часового ожидания. IPv4 резолвится на каждый замер
 через SIOCGIFADDR и кладётся в `sendThrough` vless-outbound — так
 xray действительно пинит NIC, а не идёт через default route.
 Для задач AmneziaWG вместо IP передаётся имя интерфейса: хелпер
@@ -345,6 +351,7 @@ xray действительно пинит NIC, а не идёт через defa
 | WebSocket-соединения рвутся через nginx                   | Проверить `proxy_read_timeout` в `nginx-prod.conf.template` (по умолчанию 3600s).         |
 | Healthcheck `server` ругается на `localhost:8000/healthz`  | `docker compose -f docker-compose.prod.yml logs server`; убедиться, что порт 8000 открыт внутри `xspeed_net`. |
 | Проба не подключается                                      | `docker logs xspeed-probe`; `curl -v $SERVER_URL`; проверить, что nginx проксирует `/ws/`. |
+| Задача висит в `running` дольше 5 минут                    | `docker logs xspeed-server`, затем поиск по `sweeper reset` — проба не прислала результат; sweeeper записал `probe_timeout`, вернул задачу в очередь, а по истечении 15 минут она станет `failed`. |
 | `docker buildx imagetools inspect …` показывает одну платформу | В workflow включён `setup-qemu-action`; иначе buildx не умеет кросс-архитектуру.        |
 | `compose config` жалуется на `${VAR:?...}`                | В `.env.prod` отсутствует обязательная переменная.                                        |
 

@@ -14,7 +14,12 @@ The dispatcher is the bridge between the WebSocket :class:`Hub` and the
 * :func:`sweep_stale_running_tasks` is the safety net for probes that
   accepted a task but never sent a result; it is scheduled by
   :func:`start_sweeper` and resets tasks that have been ``running``
-  for more than five minutes back to ``pending``.
+  for more than five minutes back to ``pending``. The silence of the
+  probe is recorded as a terminal ``probe_timeout`` row in
+  ``task_results`` so one assignment always yields exactly one result.
+* :func:`expire_incomplete_tasks` is the second half of the same net:
+  a task that nobody finished within :data:`TASK_TTL_SECONDS` becomes
+  ``failed`` instead of waiting for a consumer timeout.
 """
 
 from __future__ import annotations
@@ -38,6 +43,19 @@ from xspeed_server.app.ws.protocol import (
 logger = logging.getLogger(__name__)
 
 STALE_RUNNING_AFTER_SECONDS: int = 5 * 60
+"""How long a probe may hold a task before the sweeper takes it back."""
+
+TASK_TTL_SECONDS: int = 15 * 60
+"""How long a task may live without reaching a terminal status.
+
+Long enough for two full rescue rounds (the sweeper runs every
+30 s and rescues at five minutes), short enough that a consumer
+polling ``GET /api/v1/tasks/{id}`` gets an answer long before its own
+hour-long timeout fires.
+"""
+
+PROBE_TIMEOUT_ERROR: str = "probe_timeout"
+"""``task_results.error`` written for a probe that never reported."""
 
 SWEEP_INTERVAL_SECONDS: float = 30.0
 
@@ -237,38 +255,140 @@ async def record_result(
 
 
 async def sweep_stale_running_tasks(db: Database) -> int:
-    """Reset ``running`` tasks that have stalled for too long.
+    """Rescue ``running`` tasks whose probe never reported.
 
-    "Stalled" means: ``status = 'running'`` AND
-    ``started_at < now() - 5 minutes`` AND no row in
-    ``task_results`` for that task yet. The atomic UPDATE … RETURNING
-    pattern lets the sweeper report the exact set of tasks it
-    rescued in a single round-trip.
+    "Stalled" means ``status = 'running'`` AND ``started_at`` is older
+    than :data:`STALE_RUNNING_AFTER_SECONDS` — regardless of how many
+    results the task already collected. A stalled task is rescued in a
+    single transaction:
+
+    1. the stale rows are locked with ``FOR UPDATE SKIP LOCKED`` so a
+       concurrent :func:`claim_task` cannot hand the same task out
+       while the timeout row is written;
+    2. the probe that held the task (``tasks.assigned_to``) gets a
+       terminal ``probe_timeout`` row in ``task_results`` — but only
+       when it has not reported anything yet, so a measurement that
+       raced the sweeper is never overwritten;
+    3. the task goes back to ``pending``;
+    4. :func:`check_completion` runs for the tasks that actually got a
+       timeout row and decides whether it was the last missing result
+       (task ``completed``) or whether the remaining probes still have
+       to pick the task up.
+
+    Step 2 is what keeps the *last* probe from stranding a task: the
+    sweep used to skip every task that already had results, so a
+    result lost on the wire left the task ``running`` forever with no
+    mechanism able to complete or return it. The ``assigned_to``
+    token may name a probe that no longer exists; the inner join then
+    writes no result row and no completion check runs, so the task is
+    simply returned to the queue — otherwise a server with zero public
+    probes (``expected == 0``) would call an unmeasured task complete.
+
+    Returns the number of tasks rescued in this round.
+    """
+    rescued: list[int] = []
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            stale = await conn.fetch(
+                """
+                SELECT id
+                FROM tasks
+                WHERE status = 'running'
+                  AND started_at IS NOT NULL
+                  AND started_at < now() - ($1 || ' seconds')::interval
+                FOR UPDATE SKIP LOCKED
+                """,
+                str(STALE_RUNNING_AFTER_SECONDS),
+            )
+            if stale:
+                stale_ids = [int(row["id"]) for row in stale]
+                timed_out = await conn.fetch(
+                    """
+                    INSERT INTO task_results
+                        (task_id, probe_id, region_id, speed_mbps, error, raw)
+                    SELECT t.id,
+                           p.id,
+                           p.region_id,
+                           CAST(NULL AS numeric),
+                           $2::text,
+                           jsonb_build_object('error', $2::text)
+                    FROM unnest($1::int[]) AS stale_task(id)
+                    JOIN tasks t ON t.id = stale_task.id
+                    JOIN probes p ON p.token = t.assigned_to
+                    ON CONFLICT (task_id, probe_id) DO NOTHING
+                    RETURNING task_id
+                    """,
+                    stale_ids,
+                    PROBE_TIMEOUT_ERROR,
+                )
+                rescued = [
+                    int(row["id"])
+                    for row in await conn.fetch(
+                        """
+                        UPDATE tasks
+                        SET status = 'pending',
+                            assigned_to = NULL,
+                            started_at = NULL
+                        WHERE id = ANY($1::int[])
+                        RETURNING id
+                        """,
+                        stale_ids,
+                    )
+                ]
+                for row in timed_out:
+                    await check_completion(conn, int(row["task_id"]))
+    if rescued:
+        logger.warning(
+            "sweeper reset %d stale running task(s) as '%s': %s",
+            len(rescued),
+            PROBE_TIMEOUT_ERROR,
+            rescued,
+        )
+    return len(rescued)
+
+
+async def expire_incomplete_tasks(db: Database) -> int:
+    """Fail tasks that stayed ``pending`` for longer than the TTL.
+
+    A task nobody could finish — every recipient probe offline, or a
+    probe token that was deleted while holding it — otherwise keeps a
+    consumer polling ``GET /api/v1/tasks/{id}`` until its own timeout
+    fires. ``failed`` is a status the schema, the public API and the
+    admin UI already understand, so it is the terminal answer.
+
+    Only ``pending`` rows are expired. A ``running`` task is by
+    definition younger than :data:`STALE_RUNNING_AFTER_SECONDS` — the
+    sweep above already took back everything older — so failing it
+    here would only discard a measurement that is being made right
+    now. Tasks rescued by the sweep become ``pending`` in the same
+    sweeper round and are expired on the next one when they are old
+    enough.
+
+    Returns the number of tasks moved to ``failed``.
     """
     async with db.pool.acquire() as conn:
         rows = await conn.fetch(
             """
             UPDATE tasks
-            SET status = 'pending',
+            SET status = 'failed',
+                completed_at = now(),
                 assigned_to = NULL,
                 started_at = NULL
-            WHERE status = 'running'
-              AND started_at IS NOT NULL
-              AND started_at < now() - ($1 || ' seconds')::interval
-              AND NOT EXISTS (
-                  SELECT 1 FROM task_results WHERE task_id = tasks.id
-              )
+            WHERE status = 'pending'
+              AND created_at < now() - ($1 || ' seconds')::interval
             RETURNING id
             """,
-            str(STALE_RUNNING_AFTER_SECONDS),
+            str(TASK_TTL_SECONDS),
         )
-    if rows:
+    expired = [int(row["id"]) for row in rows]
+    if expired:
         logger.warning(
-            "sweeper reset %d stale running task(s): %s",
-            len(rows),
-            [int(r["id"]) for r in rows],
+            "sweeper failed %d task(s) older than %ds without completion: %s",
+            len(expired),
+            TASK_TTL_SECONDS,
+            expired,
         )
-    return len(rows)
+    return len(expired)
 
 
 async def dispatch_to_probe(db: Database, hub: Hub, probe_token: str) -> bool:
@@ -313,6 +433,7 @@ async def _sweeper_loop(db: Database) -> None:
         while True:
             try:
                 await sweep_stale_running_tasks(db)
+                await expire_incomplete_tasks(db)
             except asyncio.CancelledError:  # noqa: PERF203 - explicit cancellation
                 raise
             except Exception:  # noqa: BLE001 - logged for ops visibility
@@ -340,11 +461,14 @@ def _mask_token(token: str) -> str:
 
 __all__ = [
     "ClaimedTask",
+    "PROBE_TIMEOUT_ERROR",
     "STALE_RUNNING_AFTER_SECONDS",
     "SWEEP_INTERVAL_SECONDS",
+    "TASK_TTL_SECONDS",
     "check_completion",
     "claim_task",
     "dispatch_to_probe",
+    "expire_incomplete_tasks",
     "record_result",
     "start_sweeper",
     "sweep_stale_running_tasks",
