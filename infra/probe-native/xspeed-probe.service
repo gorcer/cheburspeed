@@ -1,0 +1,64 @@
+# systemd unit for a natively-installed CheburSpeed probe (DAT-612).
+#
+# Use this instead of `probe.sh` / the Docker image on hosts that have
+# no Docker daemon — e.g. the Orenburg node (193.124.44.72), which
+# already runs a 3x-ui/xray panel and PostgreSQL, so adding a container
+# runtime there would be an unnecessary dependency.
+#
+# Install:
+#   sudo install -m 0644 xspeed-probe.service /etc/systemd/system/
+#   sudo install -m 0600 xspeed-probe.env.example /etc/xspeed-probe.env
+#   sudo $EDITOR /etc/xspeed-probe.env     # fill in PROBE_TOKEN
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now xspeed-probe
+#
+# The probe reads its configuration from /etc/xspeed-probe.env — the
+# same variable names the Docker image takes (SERVER_URL, PROBE_TOKEN,
+# PROBE_ALIAS, REGION_CODE, SPEEDTEST_URL), so the two deployment
+# styles stay interchangeable.
+#
+# Security notes:
+#   * The probe opens NO external listener: xray publishes its SOCKS5
+#     proxy on 127.0.0.1:1080 only, and the WebSocket client dials
+#     outbound to the server. `ProtectSystem=full` keeps /usr and /etc
+#     read-only; the only writable path the probe needs is /tmp, where
+#     it drops the ephemeral xray configs.
+#   * `ProtectHome=true` keeps the probe away from /root and /home —
+#     the Orenburg node keeps its x-ui credentials there.
+#   * `MemoryMax=256M` bounds the probe so it cannot squeeze the
+#     3x-ui panel out of the 830 MB of RAM that host has.
+
+[Unit]
+Description=CheburSpeed probe
+Documentation=https://github.com/gorcer/cheburspeed
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/xspeed-probe
+EnvironmentFile=/etc/xspeed-probe.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/xspeed-probe/venv/bin/xspeed-probe
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=xspeed-probe
+
+# Hardening: the probe only needs outbound network + a writable /tmp for
+# ephemeral xray configs. It never listens on an external port.
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

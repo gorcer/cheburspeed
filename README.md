@@ -376,6 +376,51 @@ xray действительно пинит NIC, а не идёт через defa
    `last_seen_at`. Дальше обе обновляются одним
    `./probe.sh update-all` (или `./update.sh`).
 
+### Установка пробы без Docker (native-установка)
+
+Часть узлов не имеет контейнерного runtime — например, Orenburg
+(193.124.44.72), на котором уже крутится 3x-ui/xray-панель и
+PostgreSQL, и ставить туда Docker ради одной пробы незачем. На таких
+хостах проба ставится нативно: venv с исходниками + systemd-юнит.
+
+Материалы лежат в `infra/probe-native/`:
+
+* `install-probe-native.sh` — установщик (пакеты, xray-core, venv,
+  systemd-юнит);
+* `xspeed-probe.service` — юнит с hardening-параметрами;
+* `xspeed-probe.env.example` — конфиг (те же имена переменных, что
+  принимает Docker-образ, поэтому переезд между двумя способами
+  установки ничего не ломает).
+
+Ключевой момент — версия **xray-core**: проба сама запускает xray,
+чтобы поднять локальный SOCKS5-туннель, и собранный из образа
+xray 26.10.17 умеет транспорт `xhttp`. Более старые сборки
+отклоняют такие ссылки с `unknown transport protocol: xhttp`, и
+замер падает с `xray_start_failed`. Чтобы версии совпадали
+побайтово, бинарь можно извлечь из того же образа, из которого
+собран Docker-образ:
+
+```sh
+cid=$(docker create teddysun/xray:26.10.17)
+docker cp "$cid":/usr/bin/xray ./xray && docker rm "$cid"
+```
+
+Установка на удалённый хост:
+
+```sh
+./infra/probe-native/install-probe-native.sh \
+    --source /path/to/cheburspeed \
+    --xray /path/to/xray \
+    --env-file /path/to/probe.env
+```
+
+После установки проба видна в `/admin/probes` со своим IP и
+`last_seen_at`, а её замеры — в `/api/v1/regions` по коду региона
+(`RU-ORE` — Оренбургская область).
+
+Проба не открывает ни одного внешнего порта: xray публикует SOCKS5
+только на `127.0.0.1:1080`, а WebSocket-клиент ходит наружу.
+
 ## Документация API
 
 После запуска `server` Swagger UI доступен по `/docs`.
