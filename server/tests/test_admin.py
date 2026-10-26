@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -130,6 +131,31 @@ async def test_login_with_unknown_email_returns_401(client: AsyncClient) -> None
         json={"email": "ghost@xspeed.ru", "password": "doesnt-matter"},
     )
     assert response.status_code == 401, response.text
+
+
+async def test_login_default_quota_is_one_hundred_per_minute() -> None:
+    """The shipped quota for the admin login is 100/minute (DAT-637)."""
+    from xspeed_server.config import get_settings
+
+    assert get_settings().rate_limit_admin_login_per_minute == 100
+
+
+async def test_login_is_rate_limited_after_the_configured_quota(
+    client: AsyncClient, rate_limits: Callable[..., None]
+) -> None:
+    """The login quota is enforced per client IP and comes from the config."""
+    rate_limits(rate_limit_admin_login_per_minute=3)
+    for i in range(3):
+        response = await client.post(
+            "/api/v1/admin/login",
+            json={"email": "ghost@xspeed.ru", "password": "doesnt-matter"},
+        )
+        assert response.status_code == 401, f"request {i} failed: {response.text}"
+    blocked = await client.post(
+        "/api/v1/admin/login",
+        json={"email": "ghost@xspeed.ru", "password": "doesnt-matter"},
+    )
+    assert blocked.status_code == 429, f"expected 429, got {blocked.status_code}: {blocked.text}"
 
 
 async def test_probes_endpoint_requires_bearer_token(client: AsyncClient) -> None:

@@ -102,6 +102,22 @@ make prod-ps         # статус сервисов и healthcheck'и
 openssl rand -hex 32
 ```
 
+### Лимиты API (rate limits)
+
+Квоты задаются в `xspeed_server.config.Settings` и читаются **на каждый
+запрос**, поэтому лимит можно изменить переменной окружения без правки
+кода. Ключ лимитирования — IP клиента (`get_remote_address`).
+
+| Переменная                        | Маршрут                              | По умолчанию |
+|------------------------------------|--------------------------------------|--------------|
+| `RATE_LIMIT_TASK_CREATE_PER_HOUR`  | `POST /api/v1/tasks`                 | `100/hour`   |
+| `RATE_LIMIT_TASK_READ_PER_MINUTE`  | `GET /api/v1/tasks/{task_id}`        | `1000/minute` |
+| `RATE_LIMIT_TASK_LIST_PER_MINUTE`  | `GET /api/v1/tasks`                  | `1000/minute` |
+| `RATE_LIMIT_ADMIN_LOGIN_PER_MINUTE`| `POST /api/v1/admin/login`           | `100/minute` |
+
+При превышении квоты API отвечает `429` с телом
+`{"error": "Rate limit exceeded: ..."}`.
+
 ## CI/CD
 
 CI описан в `.github/workflows/`:

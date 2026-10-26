@@ -2,11 +2,12 @@
 
 Exposes:
 
-* ``POST /api/v1/tasks`` — enqueue a new speedtest task (rate-limited to
-  ``10/hour`` per source IP).
+* ``POST /api/v1/tasks`` — enqueue a new speedtest task (rate-limited per
+  source IP, quota comes from ``rate_limit_task_create_per_hour``).
 * ``GET  /api/v1/tasks/{task_id}`` — fetch a single task with its
-  per-probe results (rate-limited to ``100/minute`` per IP).
-* ``GET  /api/v1/tasks`` — paginated task list, newest first.
+  per-probe results (quota: ``rate_limit_task_read_per_minute``).
+* ``GET  /api/v1/tasks`` — paginated task list, newest first (quota:
+  ``rate_limit_task_list_per_minute``).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from asyncpg import Connection
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from xspeed_server.app.core.ratelimit import limiter
+from xspeed_server.app.core.ratelimit import limit_provider, limiter
 from xspeed_server.app.deps import PoolDep
 from xspeed_server.app.ws.protocol import TaskProtocol
 
@@ -366,7 +367,7 @@ def _is_foreign_key_violation(exc: BaseException) -> bool:
     response_model=TaskCreatedResponse,
     summary="Enqueue a new speedtest task.",
 )
-@limiter.limit("10/hour")
+@limiter.limit(limit_provider(lambda settings: settings.rate_limit_task_create_per_hour, "hour"))
 async def create_task(
     request: Request,  # required by slowapi to extract the client IP
     payload: TaskCreate,
@@ -401,7 +402,7 @@ async def create_task(
     response_model=TaskDetail,
     summary="Fetch a task along with its per-probe results.",
 )
-@limiter.limit("100/minute")
+@limiter.limit(limit_provider(lambda settings: settings.rate_limit_task_read_per_minute, "minute"))
 async def get_task(
     request: Request,  # required by slowapi to extract the client IP
     task_id: Annotated[int, Path(ge=1)],
@@ -420,7 +421,7 @@ async def get_task(
     response_model=TaskList,
     summary="List tasks, newest first, with offset/limit pagination.",
 )
-@limiter.limit("100/minute")
+@limiter.limit(limit_provider(lambda settings: settings.rate_limit_task_list_per_minute, "minute"))
 async def list_tasks(
     request: Request,  # required by slowapi to extract the client IP
     pool: PoolDep,

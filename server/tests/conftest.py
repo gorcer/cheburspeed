@@ -14,7 +14,7 @@ limit assertions stay deterministic.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import asyncpg
@@ -64,6 +64,25 @@ async def app_env(monkeypatch: pytest.MonkeyPatch, test_database_url: str) -> di
     ratelimit.limiter.reset()
 
     return {"test_database_url": test_database_url}
+
+
+@pytest.fixture
+def rate_limits(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Override the API rate-limit quotas for the duration of a test.
+
+    The quotas live in :class:`xspeed_server.config.Settings` and are
+    resolved per request, so overriding the matching environment variable
+    and dropping the settings cache is enough to shrink them. Returns a
+    setter that takes the quota field names as keyword arguments.
+    """
+    from xspeed_server import config as config_module
+
+    def _set(**quotas: int) -> None:
+        for name, value in quotas.items():
+            monkeypatch.setenv(name.upper(), str(value))
+        config_module.get_settings.cache_clear()
+
+    return _set
 
 
 @pytest_asyncio.fixture
@@ -140,5 +159,6 @@ __all__ = [
     "app",
     "clean_db",
     "client",
+    "rate_limits",
     "test_database_url",
 ]

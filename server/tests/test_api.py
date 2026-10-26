@@ -4,7 +4,8 @@ The tests cover:
 
 * the vless link validation (regex enforcement),
 * the ``POST /api/v1/tasks`` happy path (201, ``status: "pending"``),
-* the rate limit on the POST endpoint (10/hour → 11th call returns 429),
+* the rate limit on the POST endpoint (config-driven quota → the request
+  past the quota returns 429),
 * the ``GET /api/v1/tasks/{id}`` shape (with and without results),
 * the paginated list at ``GET /api/v1/tasks``,
 * the AmneziaWG branch (``protocol='amneziawg'`` carries an INI config
@@ -16,6 +17,7 @@ The tests cover:
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 import asyncpg
@@ -205,11 +207,11 @@ async def test_post_task_accepts_probe_tokens_whitelist(
     assert response.status_code == 201, response.text
 
 
-async def test_post_task_is_rate_limited_after_ten_requests(
-    client: AsyncClient, destination: dict[str, Any]
+async def test_post_task_is_rate_limited_after_the_configured_quota(
+    client: AsyncClient, destination: dict[str, Any], rate_limits: Callable[..., None]
 ) -> None:
-    last_status = None
-    for i in range(10):
+    rate_limits(rate_limit_task_create_per_hour=3)
+    for i in range(3):
         response = await client.post(
             "/api/v1/tasks",
             json={"link": VALID_LINK, "destination_id": destination["id"]},
@@ -219,8 +221,76 @@ async def test_post_task_is_rate_limited_after_ten_requests(
         "/api/v1/tasks",
         json={"link": VALID_LINK, "destination_id": destination["id"]},
     )
-    last_status = blocked.status_code
-    assert last_status == 429, f"expected 429, got {last_status}: {blocked.text}"
+    assert blocked.status_code == 429, f"expected 429, got {blocked.status_code}: {blocked.text}"
+
+
+async def test_post_task_default_quota_is_one_hundred_per_hour(
+    client: AsyncClient, destination: dict[str, Any]
+) -> None:
+    """The shipped quota for task creation is 100/hour (DAT-637)."""
+    from xspeed_server.config import get_settings
+
+    assert get_settings().rate_limit_task_create_per_hour == 100
+
+
+async def test_post_task_quota_is_resolved_per_request(
+    client: AsyncClient, destination: dict[str, Any], rate_limits: Callable[..., None]
+) -> None:
+    """A quota change applies to the very next request, without a restart."""
+    rate_limits(rate_limit_task_create_per_hour=1)
+    first = await client.post(
+        "/api/v1/tasks",
+        json={"link": VALID_LINK, "destination_id": destination["id"]},
+    )
+    assert first.status_code == 201, first.text
+    second = await client.post(
+        "/api/v1/tasks",
+        json={"link": VALID_LINK, "destination_id": destination["id"]},
+    )
+    assert second.status_code == 429, second.text
+
+    rate_limits(rate_limit_task_create_per_hour=50)
+    third = await client.post(
+        "/api/v1/tasks",
+        json={"link": VALID_LINK, "destination_id": destination["id"]},
+    )
+    assert third.status_code == 201, third.text
+
+
+async def test_get_task_default_quota_is_one_thousand_per_minute() -> None:
+    """The shipped quota for reading a single task is 1000/minute (DAT-637)."""
+    from xspeed_server.config import get_settings
+
+    assert get_settings().rate_limit_task_read_per_minute == 1000
+
+
+async def test_get_task_is_rate_limited_after_the_configured_quota(
+    client: AsyncClient, rate_limits: Callable[..., None]
+) -> None:
+    rate_limits(rate_limit_task_read_per_minute=2)
+    for _ in range(2):
+        response = await client.get("/api/v1/tasks/999999")
+        assert response.status_code == 404, response.text
+    blocked = await client.get("/api/v1/tasks/999999")
+    assert blocked.status_code == 429, f"expected 429, got {blocked.status_code}: {blocked.text}"
+
+
+async def test_list_tasks_default_quota_is_one_thousand_per_minute() -> None:
+    """The shipped quota for the task list is 1000/minute (DAT-637)."""
+    from xspeed_server.config import get_settings
+
+    assert get_settings().rate_limit_task_list_per_minute == 1000
+
+
+async def test_list_tasks_is_rate_limited_after_the_configured_quota(
+    client: AsyncClient, rate_limits: Callable[..., None]
+) -> None:
+    rate_limits(rate_limit_task_list_per_minute=2)
+    for _ in range(2):
+        response = await client.get("/api/v1/tasks")
+        assert response.status_code == 200, response.text
+    blocked = await client.get("/api/v1/tasks")
+    assert blocked.status_code == 429, f"expected 429, got {blocked.status_code}: {blocked.text}"
 
 
 async def test_post_amneziawg_task_returns_201(
